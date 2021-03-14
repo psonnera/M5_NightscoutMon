@@ -60,7 +60,8 @@ struct tConfig {
   int temperature_unit = 1; // 1 = CELSIUS, 2 = KELVIN, 3= FAHRENHEIT
   int dev_mode = 0; // developer mode, do not use, does strange things and changes often ;-)
   int disable_web_server = 0; // 1 = disable internal web server
-  char wlanssid[10][32];
+  bool is_task_bootstrapping = 0; //  1 = task is to bootstrap
+  char wlanssid[10][64];
   char wlanpass[10][64];
 } ;
 
@@ -99,6 +100,8 @@ struct NSinfo {
   float basal_totalbasal = 0;
 } ;
 
+void readConfigFromFlash(tConfig *cfg);
+void saveConfigToFlash(tConfig *cfg);
 void readConfiguration(const char *iniFilename, tConfig *cfg);
 
 #endif

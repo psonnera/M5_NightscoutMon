@@ -1,5 +1,5 @@
 /*  M5Stack Nightscout monitor
-    Copyright (C) 2018, 2019 Martin Lukasek <martin@lukasek.cz>
+    Copyright (C) 2018-2021 Martin Lukasek <martin@lukasek.cz>
     
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -23,6 +23,7 @@
     Peter Leimbach (Nightscout token)
     Patrick Sonnerat (Dexcom Sugarmate connection)
     Sulka Haro (Nightscout API queries help)
+    Ben West (AP WiFi configuration)
 */
 
 // Official M5Stack Arduino board definitions are required, please add board from following location:
@@ -40,11 +41,12 @@
   #include <M5Stack.h>
 #endif
 #include <Preferences.h>
-// #include <WiFi.h>
+#include <WiFi.h>
 #include <WiFiMulti.h>
 #include <WiFiUdp.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
+#include <DNSServer.h>
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
 #include "time.h"
@@ -71,7 +73,7 @@ SHT3X sht30;
 #include "microdot.h"
 MicroDot MD;
 
-String M5NSversion("2021013101");
+String M5NSversion("2021031201");
 
 #ifdef ARDUINO_M5STACK_Core2
   #define CONFIG_I2S_BCK_PIN 12
@@ -117,6 +119,8 @@ Preferences preferences;
 tConfig cfg;
 
 WebServer w3srv(80);
+const byte DNS_PORT = 53;
+DNSServer dnsServer;
 
 const char* ntpServer = "pool.ntp.org"; // "time.nist.gov", "time.google.com"
 struct tm localTimeInfo;
@@ -169,6 +173,7 @@ time_t snoozeUntil = 0;
 int snoozeMult = 0;
 unsigned long lastButtonMillis = 0;
 int udpSendSnoozeRetries = 0;
+bool is_task_bootstrapping = 0;
 
 #ifdef ARDUINO_M5STACK_Core2
   static int16_t music_data[25000]; // 2s in sample rate 11025 samp/s
@@ -266,11 +271,13 @@ uint16_t calcCRC(char* str)
 void startupLogo() {
     // static uint8_t brightness, pre_brightness;
     lcdSetBrightness(0);
-    if(cfg.bootPic[0]==0) {
+    if(!SD.exists(cfg.bootPic)) {
       // M5.Lcd.pushImage(0, 0, 320, 240, (uint16_t *)gImage_logoM5);
+      M5.Lcd.clear();
+      M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
       M5.Lcd.drawString("M5 Stack", 120, 60, GFXFF);
       M5.Lcd.drawString("Nightscout monitor", 60, 80, GFXFF);
-      M5.Lcd.drawString("(c) 2019 Martin Lukasek", 20, 120, GFXFF);
+      M5.Lcd.drawString("(c) 2019-21 Martin Lukasek", 0, 120, GFXFF);
     } else {
       M5.Lcd.drawJpgFile(SD, cfg.bootPic);
     }
@@ -278,23 +285,6 @@ void startupLogo() {
     #ifndef ARDUINO_M5STACK_Core2  // no .update() on M5Stack CORE2
       M5.update();
     #endif
-    // M5.Speaker.playMusic(m5stack_startup_music,25000);
-    /*
-    int avg=0;
-    for(uint16_t i=0; i<40000; i++) {
-      avg+=m5stack_startup_music[i];
-      if(i%4 == 3) {
-        music_data[i/4]=avg/4;
-        avg=0;
-      }
-    }
-    play_music_data(10000, 100);
-
-    for(int i=0; i>=100; i++) {
-        lcdSetBrightness(i);
-        delay(2);
-    }
-    */
 }
 
 void printLocalTime() {
@@ -344,7 +334,7 @@ bool InitI2SSpeakOrMic(int mode)
 
 void play_tone(uint16_t frequency, uint32_t duration, uint8_t volume) {
   size_t bytes_written = 0;
-  Serial.print("start fill music data "); Serial.println(millis());
+  // Serial.print("start fill music data "); Serial.println(millis());
   uint32_t data_length = duration * 11;
   if( data_length > 22050 )
     data_length = 22050;
@@ -672,64 +662,127 @@ void buttons_test() {
   }
 }
 
+
+const char * CONSONANTS = "bcdfghjklmnpqrstvwxyz";
+const char * VOWELS = "aeiouy";
+int passLen = 8;
+
+void generate_ssid_passphrase (char * buffer) {
+  char passphrase[passLen+1];
+  int max_consonants;
+  int max_vowels;
+  max_consonants = strlen(CONSONANTS);
+  max_vowels = strlen(VOWELS);
+  randomSeed(analogRead(0));
+  passphrase[0] = CONSONANTS[random(0, max_consonants)];
+  passphrase[1] = VOWELS[random(0, max_vowels)];
+  passphrase[2] = VOWELS[random(0, max_vowels)];
+  passphrase[3] = CONSONANTS[random(0, max_consonants)];
+  passphrase[4] = VOWELS[random(0, max_vowels)];
+  passphrase[5] = VOWELS[random(0, max_vowels)];
+  passphrase[6] = CONSONANTS[random(0, max_consonants)];
+  passphrase[7] = VOWELS[random(0, max_vowels)];
+  passphrase[8] = VOWELS[random(0, max_vowels)];
+  passphrase[9] = '\0';
+  strcpy(buffer, passphrase);
+}
+
 void wifi_connect() {
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
-  delay(100);
+  char ssid_passphrase[80];
+  if (is_task_bootstrapping) {
+    // offer access point to join for configuration purposes
+    WiFi.enableAP(true);
+    WiFi.mode(WIFI_AP);
+    IPAddress ip(192, 168, 0, 1);
+    IPAddress gateway(192, 168, 0, 1);
+    IPAddress subnet(255, 255, 255, 0);
+    Serial.print("Setting soft-AP configuration ... ");
+    Serial.println(WiFi.softAPConfig(ip, gateway, subnet) ? "Ready" : "Failed!");
+    // set random password
+    generate_ssid_passphrase(ssid_passphrase);
+    Serial.print("Setting soft-AP ... ");
+    Serial.println(WiFi.softAP(cfg.deviceName, ssid_passphrase) ? "Ready" : "Failed!");
+    delay(250);
+    Serial.print("Soft-AP IP address = ");
+    Serial.println(WiFi.softAPIP());
+    // WiFi.begin( );
+    dnsServer.setTTL(300);
+    dnsServer.setErrorReplyCode(DNSReplyCode::ServerFailure);
+    dnsServer.start(DNS_PORT, "*", ip);    
+  } else {
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    delay(100);
 
-  Serial.println("WiFi connect start");
-  M5.Lcd.println("WiFi connect start");
+    Serial.println("WiFi connect start");
+    M5.Lcd.println("WiFi connect start");
 
-  // We start by connecting to a WiFi network
-  for(int i=0; i<=9; i++) {
-    if(cfg.wlanssid[i][0]!=0) {
-      if(cfg.wlanpass[i][0]==0) {
-        // no or empty password -> send NULL
-        WiFiMultiple.addAP(cfg.wlanssid[i], NULL);
-      } else {
-        WiFiMultiple.addAP(cfg.wlanssid[i], cfg.wlanpass[i]);
+    // We start by connecting to a WiFi network
+    for(int i=0; i<=9; i++) {
+      if(cfg.wlanssid[i][0]!=0) {
+        if(cfg.wlanpass[i][0]==0) {
+          // no or empty password -> send NULL
+          WiFiMultiple.addAP(cfg.wlanssid[i], NULL);
+        } else {
+          WiFiMultiple.addAP(cfg.wlanssid[i], cfg.wlanpass[i]);
+        }
       }
     }
-  }
 
-  Serial.println();
-  M5.Lcd.println("");
-  Serial.print("Wait for WiFi... ");
-  M5.Lcd.print("Wait for WiFi... ");
+    Serial.println();
+    M5.Lcd.println("");
+    Serial.print("Wait for WiFi... ");
+    M5.Lcd.print("Wait for WiFi... ");
 
-  while(WiFiMultiple.run() != WL_CONNECTED) {
-      Serial.print(".");
-      M5.Lcd.print(".");
-      delay(500);
+    while(WiFiMultiple.run() != WL_CONNECTED) {
+        Serial.print(".");
+        M5.Lcd.print(".");
+        delay(500);
+    }
   }
 
   Serial.println("");
   M5.Lcd.println("");
-  Serial.print("WiFi connected to SSID "); Serial.println(WiFi.SSID());
-  M5.Lcd.print("WiFi SSID "); M5.Lcd.println(WiFi.SSID());
-  Serial.println("IP address: ");
-  M5.Lcd.println("IP address: ");
-  Serial.println(WiFi.localIP());
-  M5.Lcd.println(WiFi.localIP());
+  Serial.print("WiFi connected to SSID ");
+  if (is_task_bootstrapping) {
+    Serial.println(cfg.deviceName);
+    M5.Lcd.print("WiFi SSID: "); M5.Lcd.println(cfg.deviceName);
+    Serial.print("SSID Passphrase: "); Serial.println(ssid_passphrase);
+    M5.Lcd.print("SSID Passphrase: "); M5.Lcd.println(ssid_passphrase);
+    M5.Lcd.println();
+    M5.Lcd.print("Join WiFi & Visit URL:\nhttp://");
+    M5.Lcd.print(cfg.deviceName);
+    M5.Lcd.print(".local\n");
+    M5.Lcd.print("IP address: ");
+    M5.Lcd.println(WiFi.softAPIP());
+  } else {
+    Serial.println(WiFi.SSID());
+    M5.Lcd.print("WiFi SSID: "); M5.Lcd.println(WiFi.SSID());
+    Serial.print("IP address: ");
+    M5.Lcd.print("IP address: ");
+    Serial.println(WiFi.localIP());
+    M5.Lcd.println(WiFi.localIP());
 
-  configTime(cfg.timeZone, cfg.dst, ntpServer, "time.nist.gov", "time.google.com");
-  delay(1000);
-  Serial.print("Waiting for time.");
-  int i = 0;
-  while(!getLocalTime(&localTimeInfo)) {
-    Serial.print(".");
+    configTime(cfg.timeZone, cfg.dst, ntpServer, "time.nist.gov", "time.google.com");
     delay(1000);
-    i++;
-    if (i > MAX_TIME_RETRY) {
-      Serial.print("Gave up waiting for time to have a valid value.");
-      break;
+    Serial.print("Waiting for time.");
+    int i = 0;
+    while(!getLocalTime(&localTimeInfo)) {
+      Serial.print(".");
+      delay(1000);
+      i++;
+      if (i > MAX_TIME_RETRY) {
+        Serial.print("Gave up waiting for time to have a valid value.");
+        break;
+      }
     }
-  }
-  Serial.println();
-  printLocalTime();
+    Serial.println();
+    printLocalTime();
 
-  Serial.println("Connection done");
-  M5.Lcd.println("Connection done");
+    Serial.println("Connection done");
+    M5.Lcd.println("Connection done");
+  }
+
 }
 
 int8_t getBatteryLevel()
@@ -2192,17 +2245,17 @@ void draw_page() {
 // the setup routine runs once when M5Stack starts up
 void setup() {
     // initialize the M5Stack object
+    M5.begin(true, true, true, true);
     #ifdef ARDUINO_M5STACK_Core2
-      M5.begin(true, true, true, true);
       M5.Axp.SetSpkEnable(true);
       InitI2SSpeakOrMic(MODE_SPK);
     #else
-      M5.begin();
       M5.Power.begin();
     #endif
 
-    // prevent button A "ghost" random presses
+    // prevent button A "ghost" random presses on older versions
     Wire.begin();
+    
     SD.begin();
     // M5.Speaker.mute();
 
@@ -2225,71 +2278,38 @@ void setup() {
     uint8_t cardType = SD.cardType();
 
     if(cardType == CARD_NONE){
-        Serial.println("No SD card attached");
-        M5.Lcd.println("No SD card attached");
-        while(1);
-    }
-
-    Serial.print("SD Card Type: ");
-    M5.Lcd.print("SD Card Type: ");
-    if(cardType == CARD_MMC){
-        Serial.println("MMC");
-        M5.Lcd.println("MMC");
-    } else if(cardType == CARD_SD){
-        Serial.println("SDSC");
-        M5.Lcd.println("SDSC");
-    } else if(cardType == CARD_SDHC){
-        Serial.println("SDHC");
-        M5.Lcd.println("SDHC");
+      Serial.println("No SD card attached");
+      M5.Lcd.println("No SD card attached");
     } else {
-        Serial.println("UNKNOWN");
-        M5.Lcd.println("UNKNOWN");
+      Serial.print("SD Card Type: ");
+      M5.Lcd.print("SD Card Type: ");
+      if(cardType == CARD_MMC){
+          Serial.println("MMC");
+          M5.Lcd.println("MMC");
+      } else if(cardType == CARD_SD){
+          Serial.println("SDSC");
+          M5.Lcd.println("SDSC");
+      } else if(cardType == CARD_SDHC){
+          Serial.println("SDHC");
+          M5.Lcd.println("SDHC");
+      } else {
+          Serial.println("UNKNOWN");
+          M5.Lcd.println("UNKNOWN");
+      }
+      uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+      Serial.printf("SD Card Size: %llu MB\r\n", cardSize);
+      M5.Lcd.printf("SD Card Size: %llu MB\r\n", cardSize);
     }
-
-    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-    Serial.printf("SD Card Size: %llu MB\r\n", cardSize);
-    M5.Lcd.printf("SD Card Size: %llu MB\r\n", cardSize);
 
     readConfiguration(iniFilename, &cfg);
     // strcpy(cfg.url, "https://sugarmate.io/api/v1/xxxxxx/latest.json");
     // strcpy(cfg.url, "user.herokuapp.com"); 
     // cfg.dev_mode = 0;
-    // cfg.show_mgdl = 1;
-    // cfg.sgv_only = 1;
-    // cfg.default_page = 2;
-    // strcpy(cfg.restart_at_time, "21:59");
-    // cfg.restart_at_logged_errors=3;
-    // cfg.show_COB_IOB = 0;
-    // cfg.snd_warning = 5.5;
-    // cfg.snd_alarm = 4.5;
-    // cfg.snd_warning_high = 9;
-    // cfg.snd_alarm_high = 14;
-    // cfg.alarm_volume = 0;
-    // cfg.warning_volume = 0;
-    // cfg.snd_warning_at_startup = 1;
-    // cfg.snd_alarm_at_startup = 1;
-    // strcpy(cfg.deviceName, "M5D");
-
-    // cfg.alarm_repeat = 1;
-    // cfg.snooze_timeout = 2;
-    // cfg.brightness1 = 0;
-    // cfg.temperature_unit = 3;
-    // cfg.date_format = 1;
-    // cfg.time_format = 1;
-    // cfg.display_rotation = 7;
-    // cfg.invert_display = 1;
-    // cfg.info_line = 2;
-    // cfg.vibration_mode = 1;
-    // cfg.vibration_strength = 256;
-    // cfg.LED_strip_mode = 3;
-    // cfg.LED_strip_pin = 17; // 15 // 21  // 17
-    // cfg.LED_strip_count = 72; // 72
-    // cfg.LED_strip_brightness = 2; // 1
 
     #ifdef ARDUINO_M5STACK_Core2
       cfg.vibration_mode = 0; // no vibration on Core2 for now
       cfg.LED_strip_mode = 0; // no LED strip on Core2 for now
-      cfg.LED_strip_pin = 14; // just for sure
+      cfg.LED_strip_pin = 25; // just for sure
       cfg.LED_strip_count = 10; // just for sure
       cfg.LED_strip_brightness = 2; // just for sure
       cfg.micro_dot_pHAT = 0; // no Micro Dot pHAT on Core2 for now
@@ -2322,13 +2342,50 @@ void setup() {
       Serial.println("No invert_display defined in INI.");
     }
     M5.Lcd.setRotation(cfg.display_rotation);
+    
     lcdBrightness = cfg.brightness1;
     lcdSetBrightness(lcdBrightness);
+
+    bool btnA_pressed = false;
+    #ifdef ARDUINO_M5STACK_Core2
+      M5.Lcd.fillRect(0, 200, 110, 40, TFT_LIGHTGREY);
+      M5.Lcd.setTextColor(TFT_BLACK, TFT_LIGHTGREY);
+      M5.Lcd.drawString("CONFIG", 18, 212);
+      TouchPoint_t pos;
+      int i=0;
+      while((i<20) && !btnA_pressed) {
+        pos = M5.Touch.getPressPoint();
+        // Serial.printf("Touch X=%d, Y=%d\r\n", pos.x, pos.y);
+        btnA_pressed = (pos.x >= 0) && (pos.x <= 110) && (pos.y >= 200); // 240 is bellow display, but we have displayed icons on the last line
+        M5.Lcd.drawLine(12+i*4, 234, 12+i*4+3, 234, TFT_BLACK); 
+        M5.Lcd.drawLine(12+i*4, 235, 12+i*4+3, 235, TFT_BLACK); 
+        i++;
+        delay(100);
+        M5.update();
+      }
+      M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+      M5.Lcd.fillRect(0, 200, 110, 40, TFT_BLACK);
+    #else
+      btnA_pressed = M5.BtnA.isPressed();
+    #endif
     
-    startupLogo();
+    if (btnA_pressed) {
+      cfg.is_task_bootstrapping = 1;
+    }
+
+    if (!cfg.is_task_bootstrapping) {
+      startupLogo();
+    }
     yield();
 
+    // cfg.is_task_bootstrapping
+    // M5.Button.BtnA.isPressed( )
+    // preferences.getBool("NeedsBootstrap", false)
+    // recall from memory
     preferences.begin("M5StackNS", false);
+    // preferences.putBool("NeedsBootstrap", cfg.is_task_bootstrapping);
+    // is_task_bootstrapping = preferences.getBool("NeedsBootstrap", false);
+    is_task_bootstrapping = cfg.is_task_bootstrapping;
     if(preferences.getBool("SoftReset", false)) {
       // no startup sound after soft reset and remove the SoftReset key
       snoozeUntil=preferences.getLong64("SnoozeUntil", 0);
@@ -2370,17 +2427,23 @@ void setup() {
       delay(300);
       pixels.clear();
       pixels.show();
-    } else
-      delay(1000);
-      
+    } else {
+      if (!is_task_bootstrapping) {
+        delay(1000);
+      }
+    }
+    
     M5.Lcd.fillScreen(BLACK);
-
     lcdSetBrightness(lcdBrightness);
+
     wifi_connect();
+
     yield();
 
-    lcdSetBrightness(lcdBrightness);
-    M5.Lcd.fillScreen(BLACK);
+    if (!is_task_bootstrapping) {
+      lcdSetBrightness(lcdBrightness);
+      M5.Lcd.fillScreen(BLACK);
+    }
     
     // fill dummy values to error log
     /*
@@ -2409,13 +2472,17 @@ void setup() {
       w3srv.on("/switch", handleSwitchConfig);
       w3srv.on("/edititem", handleEditConfigItem);
       w3srv.on("/getedititem", handleGetEditConfigItem);
+      w3srv.on("/clearconfigflash", handleClearConfigFlash);
       w3srv.on("/inline", []() {
         w3srv.send(200, "text/plain", "this is inline and works as well");
       });
       w3srv.onNotFound(handleNotFound);
       w3srv.begin();
     }
-    udp.begin(WiFi.localIP(),udpPort);
+
+    if (!is_task_bootstrapping) {
+      udp.begin(WiFi.localIP(),udpPort);
+    }
     
     // test file with time stamps
     // msCountLog = millis()-6000;
@@ -2432,40 +2499,30 @@ void setup() {
 
 // the loop routine runs over and over again forever
 void loop(){
-  if(!cfg.disable_web_server)
+  if(!cfg.disable_web_server || is_task_bootstrapping) {
+    dnsServer.processNextRequest();
     w3srv.handleClient();
+  }
   delay(10);
-  buttons_test();
+  if (!is_task_bootstrapping) {
+    buttons_test();
 
-  // update glycemia every 15s
-  if(millis()-msCount>15000) {
-    /* if(dispPage==2)
-      M5.Lcd.drawLine(osx, osy, 160, 111, TFT_BLACK); // erase seconds hand while updating data
-    */
-    readNightscout(cfg.url, cfg.token, &ns);
-    draw_page();
-    msCount = millis();  
-    // Serial.print("msCount = "); Serial.println(msCount);
-    if(cfg.LED_strip_mode != 0) { 
-      pixels.show();
-    }
-  } else {
-    if((cfg.restart_at_logged_errors>0) && (err_log_count>=cfg.restart_at_logged_errors)) {
-      Serial.println("Restarting on number of logged errors...");
-      delay(500);
-      preferences.begin("M5StackNS", false);
-      preferences.putBool("SoftReset", true);
-      preferences.putLong64("SnoozeUntil", snoozeUntil);
-      preferences.end();
-      ESP.restart();
-    }
-    char lastResetTime[10];
-    strcpy(lastResetTime, "Unknown");
-    if(getLocalTime(&localTimeInfo)) {
-      sprintf(localTimeStr, "%02d:%02d", localTimeInfo.tm_hour, localTimeInfo.tm_min);
-      // no soft restart less than a minute from last restart to prevent several restarts in the same minute
-      if((millis()-msStart>60000) && (strcmp(cfg.restart_at_time, localTimeStr)==0)) {
-        Serial.println("Restarting on preset time...");
+    // update glycemia every 15s, fetch new data and draw page
+    if(millis()-msCount>15000) {
+      /* if(dispPage==2)
+        M5.Lcd.drawLine(osx, osy, 160, 111, TFT_BLACK); // erase seconds hand while updating data
+      */
+      readNightscout(cfg.url, cfg.token, &ns);
+      draw_page();
+      msCount = millis();  
+      // Serial.print("msCount = "); Serial.println(msCount);
+      if(cfg.LED_strip_mode != 0) { 
+        pixels.show();
+      }
+    } else {
+      // error handling, update clocks
+      if((cfg.restart_at_logged_errors>0) && (err_log_count>=cfg.restart_at_logged_errors)) {
+        Serial.println("Restarting on number of logged errors...");
         delay(500);
         preferences.begin("M5StackNS", false);
         preferences.putBool("SoftReset", true);
@@ -2473,124 +2530,139 @@ void loop(){
         preferences.end();
         ESP.restart();
       }
-    }
-    if((dispPage==0) && cfg.show_current_time) {
-      // update current time on display
-      M5.Lcd.setFreeFont(FSSB12);
-      M5.Lcd.setTextSize(1);
-      M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+      char lastResetTime[10];
+      strcpy(lastResetTime, "Unknown");
       if(getLocalTime(&localTimeInfo)) {
-          char timeStr[16];
-          char dateStr[16];
-          switch(cfg.time_format) {
-            case 1:
-              // sprintf(datetimeStr, "%02d:%02d  %d/%d  ", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mon+1, timeinfo.tm_mday);
-              strftime(timeStr, 15, "%I:%M%p", &localTimeInfo);
-              timeStr[strlen(timeStr)-1] = 0;
-              strcat(timeStr, " ");
-              break;
-            default:
-              // sprintf(datetimeStr, "%02d:%02d  %d.%d.  ", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mday, timeinfo.tm_mon+1);
-              strftime(timeStr, 15, "%H:%M ", &localTimeInfo);
-          }
-          switch(cfg.date_format) {
-            case 1:
-              // sprintf(datetimeStr, "%02d:%02d  %d/%d  ", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mon+1, timeinfo.tm_mday);
-             // localTimeInfo.tm_mday=25;
-             strftime(dateStr, 15, "%m/%d  ", &localTimeInfo);
-              break;
-            default:
-              // localTimeInfo.tm_mday=25;
-              // sprintf(datetimeStr, "%02d:%02d  %d.%d.  ", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mday, timeinfo.tm_mon+1);
-              strftime(dateStr, 15, "%e.%m.  ", &localTimeInfo);
-          }
-          strcpy(localTimeStr, timeStr);
-          strcat(localTimeStr, dateStr);
-      } else {
-        strcpy(localTimeStr, "??:??");
-        lastMin = 61;
-      }
-      if(lastMin!=localTimeInfo.tm_min) {
-        lastSec=localTimeInfo.tm_sec;
-        lastMin=localTimeInfo.tm_min;
-        M5.Lcd.drawString(localTimeStr, 0, 0, GFXFF);
-      }
-    }
-    if(dispPage==2) {
-      // update analog clock
-      if(getLocalTime(&localTimeInfo)) {
-        // sprintf(localTimeStr, "%02d:%02d:%02d", localTimeInfo.tm_hour, localTimeInfo.tm_min, localTimeInfo.tm_sec);
-      } else {
-        lastMin = 61;
-        lastSec = 61;
-      }
-      if(lastMin!=localTimeInfo.tm_min || lastSec!=localTimeInfo.tm_sec) {
-        lastSec=localTimeInfo.tm_sec;
-        lastMin=localTimeInfo.tm_min;
-        
-        float sx = 0, sy = 1, mx = 1, my = 0, hx = -1, hy = 0;    // Saved H, M, S x & y multipliers
-        float sdeg=0, mdeg=0, hdeg=0;
-      
-        uint8_t hh=localTimeInfo.tm_hour, mm=localTimeInfo.tm_min, ss=localTimeInfo.tm_sec;  // Get current time
-        
-        // Pre-compute hand degrees, x & y coords for a fast screen update
-        sdeg = ss*6;                  // 0-59 -> 0-354
-        mdeg = mm*6+sdeg*0.01666667;  // 0-59 -> 0-360 - includes seconds
-        hdeg = hh*30+mdeg*0.0833333;  // 0-11 -> 0-360 - includes minutes and seconds
-        hx = cos((hdeg-90)*0.0174532925);    
-        hy = sin((hdeg-90)*0.0174532925);
-        mx = cos((mdeg-90)*0.0174532925);    
-        my = sin((mdeg-90)*0.0174532925);
-        sx = cos((sdeg-90)*0.0174532925);    
-        sy = sin((sdeg-90)*0.0174532925);
-  
-        if (ss==0 || initial) {
-          initial = 0;
-          // Erase hour and minute hand positions every minute
-          M5.Lcd.drawLine(ohx, ohy, 160, 110, TFT_BLACK);
-          M5.Lcd.drawLine(ohx+1, ohy, 161, 110, TFT_BLACK);
-          M5.Lcd.drawLine(ohx-1, ohy, 159, 110, TFT_BLACK);
-          M5.Lcd.drawLine(ohx, ohy-1, 160, 109, TFT_BLACK);
-          M5.Lcd.drawLine(ohx, ohy+1, 160, 111, TFT_BLACK);
-          ohx = hx*52+160;    
-          ohy = hy*52+110;
-          M5.Lcd.drawLine(omx, omy, 160, 110, TFT_BLACK);
-          omx = mx*74+160;    
-          omy = my*74+110;
+        sprintf(localTimeStr, "%02d:%02d", localTimeInfo.tm_hour, localTimeInfo.tm_min);
+        // no soft restart less than a minute from last restart to prevent several restarts in the same minute
+        if((millis()-msStart>60000) && (strcmp(cfg.restart_at_time, localTimeStr)==0)) {
+          Serial.println("Restarting on preset time...");
+          delay(500);
+          preferences.begin("M5StackNS", false);
+          preferences.putBool("SoftReset", true);
+          preferences.putLong64("SnoozeUntil", snoozeUntil);
+          preferences.end();
+          ESP.restart();
         }
-
-        // erase old seconds hand position
-        M5.Lcd.drawLine(osx, osy, 160, 110, TFT_BLACK);
-    
-        // draw day
-        M5.Lcd.drawRoundRect(182, 97, 36, 26, 7, TFT_LIGHTGREY);
-        M5.Lcd.setTextDatum(MC_DATUM);
-        M5.Lcd.setFreeFont(FSSB9);
-        M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-        M5.Lcd.drawString(String(localTimeInfo.tm_mday), 200, 108, GFXFF);
-     
-        // draw name
-        M5.Lcd.setTextColor(TFT_DARKGREY, TFT_BLACK);
-        M5.Lcd.drawString(cfg.userName, 160, 145, GFXFF);
-    
-        // draw digital time
-        // M5.Lcd.drawString(localTimeStr, 160, 75, GFXFF);
-        
-        // Redraw new hand positions, hour and minute hands not erased here to avoid flicker
-        osx = sx*78+160;    
-        osy = sy*78+110;
-        // M5.Lcd.drawLine(osx, osy, 160, 110, TFT_RED);
-        M5.Lcd.drawLine(ohx, ohy, 160, 110, TFT_WHITE);
-        M5.Lcd.drawLine(ohx+1, ohy, 161, 110, TFT_WHITE);
-        M5.Lcd.drawLine(ohx-1, ohy, 159, 110, TFT_WHITE);
-        M5.Lcd.drawLine(ohx, ohy-1, 160, 109, TFT_WHITE);
-        M5.Lcd.drawLine(ohx, ohy+1, 160, 111, TFT_WHITE);
-        M5.Lcd.drawLine(omx, omy, 160, 110, TFT_WHITE);
-        M5.Lcd.drawLine(osx, osy, 160, 110, TFT_RED);
-    
-        M5.Lcd.fillCircle(160, 110, 3, TFT_RED);
       }
+      if((dispPage==0) && cfg.show_current_time) {
+        // update current time on display
+        M5.Lcd.setFreeFont(FSSB12);
+        M5.Lcd.setTextSize(1);
+        M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+        if(getLocalTime(&localTimeInfo)) {
+            char timeStr[16];
+            char dateStr[16];
+            switch(cfg.time_format) {
+              case 1:
+                // sprintf(datetimeStr, "%02d:%02d  %d/%d  ", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mon+1, timeinfo.tm_mday);
+                strftime(timeStr, 15, "%I:%M%p", &localTimeInfo);
+                timeStr[strlen(timeStr)-1] = 0;
+                strcat(timeStr, " ");
+                break;
+              default:
+                // sprintf(datetimeStr, "%02d:%02d  %d.%d.  ", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mday, timeinfo.tm_mon+1);
+                strftime(timeStr, 15, "%H:%M ", &localTimeInfo);
+            }
+            switch(cfg.date_format) {
+              case 1:
+                // sprintf(datetimeStr, "%02d:%02d  %d/%d  ", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mon+1, timeinfo.tm_mday);
+               // localTimeInfo.tm_mday=25;
+               strftime(dateStr, 15, "%m/%d  ", &localTimeInfo);
+                break;
+              default:
+                // localTimeInfo.tm_mday=25;
+                // sprintf(datetimeStr, "%02d:%02d  %d.%d.  ", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mday, timeinfo.tm_mon+1);
+                strftime(dateStr, 15, "%e.%m.  ", &localTimeInfo);
+            }
+            strcpy(localTimeStr, timeStr);
+            strcat(localTimeStr, dateStr);
+        } else {
+          strcpy(localTimeStr, "??:??");
+          lastMin = 61;
+        }
+        if(lastMin!=localTimeInfo.tm_min) {
+          lastSec=localTimeInfo.tm_sec;
+          lastMin=localTimeInfo.tm_min;
+          M5.Lcd.drawString(localTimeStr, 0, 0, GFXFF);
+        }
+      }
+      if(dispPage==2) {
+        // update analog clock
+        if(getLocalTime(&localTimeInfo)) {
+          // sprintf(localTimeStr, "%02d:%02d:%02d", localTimeInfo.tm_hour, localTimeInfo.tm_min, localTimeInfo.tm_sec);
+        } else {
+          lastMin = 61;
+          lastSec = 61;
+        }
+        if(lastMin!=localTimeInfo.tm_min || lastSec!=localTimeInfo.tm_sec) {
+          lastSec=localTimeInfo.tm_sec;
+          lastMin=localTimeInfo.tm_min;
+          
+          float sx = 0, sy = 1, mx = 1, my = 0, hx = -1, hy = 0;    // Saved H, M, S x & y multipliers
+          float sdeg=0, mdeg=0, hdeg=0;
+        
+          uint8_t hh=localTimeInfo.tm_hour, mm=localTimeInfo.tm_min, ss=localTimeInfo.tm_sec;  // Get current time
+          
+          // Pre-compute hand degrees, x & y coords for a fast screen update
+          sdeg = ss*6;                  // 0-59 -> 0-354
+          mdeg = mm*6+sdeg*0.01666667;  // 0-59 -> 0-360 - includes seconds
+          hdeg = hh*30+mdeg*0.0833333;  // 0-11 -> 0-360 - includes minutes and seconds
+          hx = cos((hdeg-90)*0.0174532925);    
+          hy = sin((hdeg-90)*0.0174532925);
+          mx = cos((mdeg-90)*0.0174532925);    
+          my = sin((mdeg-90)*0.0174532925);
+          sx = cos((sdeg-90)*0.0174532925);    
+          sy = sin((sdeg-90)*0.0174532925);
+    
+          if (ss==0 || initial) {
+            initial = 0;
+            // Erase hour and minute hand positions every minute
+            M5.Lcd.drawLine(ohx, ohy, 160, 110, TFT_BLACK);
+            M5.Lcd.drawLine(ohx+1, ohy, 161, 110, TFT_BLACK);
+            M5.Lcd.drawLine(ohx-1, ohy, 159, 110, TFT_BLACK);
+            M5.Lcd.drawLine(ohx, ohy-1, 160, 109, TFT_BLACK);
+            M5.Lcd.drawLine(ohx, ohy+1, 160, 111, TFT_BLACK);
+            ohx = hx*52+160;    
+            ohy = hy*52+110;
+            M5.Lcd.drawLine(omx, omy, 160, 110, TFT_BLACK);
+            omx = mx*74+160;    
+            omy = my*74+110;
+          }
+
+          // erase old seconds hand position
+          M5.Lcd.drawLine(osx, osy, 160, 110, TFT_BLACK);
       
+          // draw day
+          M5.Lcd.drawRoundRect(182, 97, 36, 26, 7, TFT_LIGHTGREY);
+          M5.Lcd.setTextDatum(MC_DATUM);
+          M5.Lcd.setFreeFont(FSSB9);
+          M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+          M5.Lcd.drawString(String(localTimeInfo.tm_mday), 200, 108, GFXFF);
+       
+          // draw name
+          M5.Lcd.setTextColor(TFT_DARKGREY, TFT_BLACK);
+          M5.Lcd.drawString(cfg.userName, 160, 145, GFXFF);
+      
+          // draw digital time
+          // M5.Lcd.drawString(localTimeStr, 160, 75, GFXFF);
+          
+          // Redraw new hand positions, hour and minute hands not erased here to avoid flicker
+          osx = sx*78+160;    
+          osy = sy*78+110;
+          // M5.Lcd.drawLine(osx, osy, 160, 110, TFT_RED);
+          M5.Lcd.drawLine(ohx, ohy, 160, 110, TFT_WHITE);
+          M5.Lcd.drawLine(ohx+1, ohy, 161, 110, TFT_WHITE);
+          M5.Lcd.drawLine(ohx-1, ohy, 159, 110, TFT_WHITE);
+          M5.Lcd.drawLine(ohx, ohy-1, 160, 109, TFT_WHITE);
+          M5.Lcd.drawLine(ohx, ohy+1, 160, 111, TFT_WHITE);
+          M5.Lcd.drawLine(omx, omy, 160, 110, TFT_WHITE);
+          M5.Lcd.drawLine(osx, osy, 160, 110, TFT_RED);
+      
+          M5.Lcd.fillCircle(160, 110, 3, TFT_RED);
+        }
+        
+      }
     }
   }
 
@@ -2611,52 +2683,55 @@ void loop(){
   }  
   */
 
-   // if there's data available, read a packet
-  int packetSize = udp.parsePacket();
-  if(packetSize)
-  {
-    Serial.print("Received UDP packet of size ");
-    Serial.println(packetSize);
-    // read the packet into packetBufffer
-    udp.read(packetBuffer, UDP_TX_PACKET_MAX_SIZE);
-    if(packetSize<UDP_TX_PACKET_MAX_SIZE)
-      packetBuffer[packetSize]=0;
-    /*
-    Serial.println("Contents:");
-    Serial.println(packetBuffer);
-    Serial.print("Remote IP: ");
-    Serial.print(udp.remoteIP());
-    Serial.print(":");
-    Serial.println(udp.remotePort());
-    Serial.print("Local IP: ");
-    Serial.println(WiFi.localIP());
-    */
-   
-    // send a reply, to the IP address and port that sent us the packet we received
-    /*
-    if((udp.remoteIP() != WiFi.localIP()) && (strncmp(packetBuffer, "Hello, M5NS here", 16)!=0)) {
-      Serial.println("Sending hello");
-      udp.beginPacket(udp.remoteIP(), udp.remotePort());
-      udp.print("Hello, M5NS here");
-      udp.endPacket();
-    }
-    */
-    if((WiFi.localIP()!=udp.remoteIP()) && (strncmp(packetBuffer, "M5_Nightscout SNOOZE: USR=", 26)==0)) {
-      Serial.println("Correct UDP packet, lets check CRC and info");
-      int urlCRC = calcCRC(cfg.url);
-      int urlCRC_rcvd;
-      unsigned long snzUntl;
-      int sr = sscanf(packetBuffer, "M5_Nightscout SNOOZE: USR=%d, SnoozeUntil=%lu", &urlCRC_rcvd, &snzUntl);
-      // Serial.printf("scanf res = %d\r\n", sr);
-      // Serial.printf("urlCRC = %d, urlCRC reveived = %d\r\n", urlCRC, urlCRC_rcvd);
-      Serial.printf("We should SNOOZE until %lu\r\n", snzUntl);
-      if((sr=2) && (urlCRC==urlCRC_rcvd)) {
-        snoozeUntil = snzUntl;
-        handleAlarmsInfoLine(&ns);
+  // handle UDP task
+  if (!is_task_bootstrapping) {
+    // if there's data available, read a packet
+    int packetSize = udp.parsePacket();
+    if(packetSize)
+    {
+      Serial.print("Received UDP packet of size ");
+      Serial.println(packetSize);
+      // read the packet into packetBufffer
+      udp.read(packetBuffer, UDP_TX_PACKET_MAX_SIZE);
+      if(packetSize<UDP_TX_PACKET_MAX_SIZE)
+        packetBuffer[packetSize]=0;
+      /*
+      Serial.println("Contents:");
+      Serial.println(packetBuffer);
+      Serial.print("Remote IP: ");
+      Serial.print(udp.remoteIP());
+      Serial.print(":");
+      Serial.println(udp.remotePort());
+      Serial.print("Local IP: ");
+      Serial.println(WiFi.localIP());
+      */
+     
+      // send a reply, to the IP address and port that sent us the packet we received
+      /*
+      if((udp.remoteIP() != WiFi.localIP()) && (strncmp(packetBuffer, "Hello, M5NS here", 16)!=0)) {
+        Serial.println("Sending hello");
+        udp.beginPacket(udp.remoteIP(), udp.remotePort());
+        udp.print("Hello, M5NS here");
+        udp.endPacket();
+      }
+      */
+      if((WiFi.localIP()!=udp.remoteIP()) && (strncmp(packetBuffer, "M5_Nightscout SNOOZE: USR=", 26)==0)) {
+        Serial.println("Correct UDP packet, lets check CRC and info");
+        int urlCRC = calcCRC(cfg.url);
+        int urlCRC_rcvd;
+        unsigned long snzUntl;
+        int sr = sscanf(packetBuffer, "M5_Nightscout SNOOZE: USR=%d, SnoozeUntil=%lu", &urlCRC_rcvd, &snzUntl);
+        // Serial.printf("scanf res = %d\r\n", sr);
+        // Serial.printf("urlCRC = %d, urlCRC reveived = %d\r\n", urlCRC, urlCRC_rcvd);
+        Serial.printf("We should SNOOZE until %lu\r\n", snzUntl);
+        if((sr=2) && (urlCRC==urlCRC_rcvd)) {
+          snoozeUntil = snzUntl;
+          handleAlarmsInfoLine(&ns);
+        }
       }
     }
   }
-
+  
   // Serial.println("M5.update() and loop again");
   #ifndef ARDUINO_M5STACK_Core2  // no .update() on M5Stack CORE2
     M5.update();
