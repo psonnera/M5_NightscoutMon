@@ -3,6 +3,10 @@
 ## Revisions
 
 
+### 10 July 2026 (build scripts)
+
+* Added `Scripts/build.ps1` + `Scripts/build.bat` to compile the **minimum firmware set** for the whole lineup into `Binaries/`. Three groups, split by chip + flash: **Basic_4MB** (old 4 MB Basic, `min_spiffs`), **ESP32_16MB** (Basic 16 MB, Fire and all Core2 — `default` 16 MB layout, PSRAM off), and **CoreS3** (ESP32-S3). The 16 MB boards now get 6.25 MiB OTA slots, so the app can grow and still update over-the-air without a repartition/USB reflash. See `Scripts/README.md`.
+
 ### 10 July 2026
 
 * Migrated to the **M5Unified** library. One board-agnostic firmware now builds for the whole current 16 MB lineup: **M5Stack Basic v2.7, Fire v2.7, Core2 v1.1 and CoreS3 (ESP32-S3)**. All the `#ifdef ARDUINO_M5STACK_Core2` conditionals are gone; the board is auto-detected at runtime.
