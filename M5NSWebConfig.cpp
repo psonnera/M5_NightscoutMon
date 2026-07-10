@@ -1,8 +1,5 @@
-#ifdef ARDUINO_M5STACK_Core2
-  #include <M5Core2.h>
-#else
-  #include <M5Stack.h>
-#endif
+#include <SD.h>          // must precede M5Unified.h so M5GFX enables its fs::FS (SD) image overloads
+#include <M5Unified.h>
 
 #include <Preferences.h>
 #include <WiFi.h>
@@ -20,15 +17,23 @@
 #include "M5NSWebConfig.h"
 #include "externs.h"
 
-#ifdef ARDUINO_M5STACK_Core2
-  #define updateInfoURL "http://m5ns.goit.cz/update/core2/update.inf"
-  #define updateBinaryURL "http://m5ns.goit.cz/update/core2/M5_NightscoutMon.ino.bin"
-  #define updateNewsURL "http://m5ns.goit.cz/update/core2/whatsnew.txt"
-#else
-  #define updateInfoURL "http://m5ns.goit.cz/update/basic/update.inf"
-  #define updateBinaryURL "http://m5ns.goit.cz/update/basic/M5_NightscoutMon.ino.bin"
-  #define updateNewsURL "http://m5ns.goit.cz/update/basic/whatsnew.txt"
-#endif
+// OTA update files are hosted per board type. Select the subpath at runtime from the
+// detected board so one binary set works across the whole lineup.
+// NOTE: the "cores3" / "fire" paths must exist on the update host for OTA to work there.
+static const char* updateBoardPath() {
+  switch(M5.getBoard()) {
+    case m5gfx::board_t::board_M5StackCore2:
+      return "core2";
+    case m5gfx::board_t::board_M5StackCoreS3:
+    case m5gfx::board_t::board_M5StackCoreS3SE:
+      return "cores3";
+    default: // M5Stack Basic / Fire / Go
+      return "basic";
+  }
+}
+static String updateURL(const char* file) {
+  return String("http://m5ns.goit.cz/update/") + updateBoardPath() + "/" + file;
+}
 
 void handleRoot() {
   String webVer;
@@ -42,7 +47,7 @@ void handleRoot() {
   Serial.println("Serving root web page");
 
   if((WiFi.status() == WL_CONNECTED)) {
-    http.begin(updateInfoURL);
+    http.begin(updateURL("update.inf"));
     http.setTimeout(5000);
     http.setConnectTimeout(5000);
     int httpCode = http.GET();
@@ -56,7 +61,7 @@ void handleRoot() {
       Serial.println("Error getting update.inf");
     }
     http.end();
-    http.begin(updateNewsURL);
+    http.begin(updateURL("whatsnew.txt"));
     http.setTimeout(5000);
     http.setConnectTimeout(5000);
     httpCode = http.GET();
@@ -336,7 +341,7 @@ void handleRoot() {
 
 void handleUpdate() {
   Serial.print("Updating firmware, please wait ... ");
-  M5.Lcd.setBrightness(100);
+  M5.Display.setBrightness(255);
   M5.Lcd.fillScreen(BLACK);
   M5.Lcd.setTextColor(WHITE);
   M5.Lcd.setCursor(0, 18);
@@ -366,7 +371,7 @@ void handleUpdate() {
   HTTPClient http;
   WiFiClient client;
   if((WiFi.status() == WL_CONNECTED)) {
-    http.begin(updateInfoURL);
+    http.begin(updateURL("update.inf"));
     int httpCode = http.GET();
     if(httpCode > 0) {
       if(httpCode == HTTP_CODE_OK) {
@@ -391,7 +396,7 @@ void handleUpdate() {
     M5.Lcd.println("Updating the firmware... ");
     M5.Lcd.println();
     httpUpdate.rebootOnUpdate(false);
-    t_httpUpdate_return ret = httpUpdate.update(client, updateBinaryURL);
+    t_httpUpdate_return ret = httpUpdate.update(client, updateURL("M5_NightscoutMon.ino.bin"));
     //t_httpUpdate_return ret = httpUpdate.update(client, "server", 80, "file.bin");
 
     switch (ret) {
@@ -413,9 +418,7 @@ void handleUpdate() {
         M5.Lcd.println("UPDATED SUCCESSFULLY");
         M5.Lcd.println("Restarting ...");
 
-        #ifndef ARDUINO_M5STACK_Core2  // no .update() on M5Stack CORE2
-          M5.update();
-        #endif
+        M5.update();
         delay(1000);
         ESP.restart();
         break;
@@ -434,9 +437,7 @@ void handleUpdate() {
     M5.Lcd.println("NOTHING TO UPDATE");
   }
   if (!cfg.is_task_bootstrapping) {
-    #ifndef ARDUINO_M5STACK_Core2  // no .update() on M5Stack CORE2
-      M5.update();
-    #endif
+    M5.update();
     delay(2000);
     M5.Lcd.fillScreen(BLACK);
     draw_page();
@@ -833,7 +834,7 @@ void handleGetEditConfigItem() {
       if(lcdBrightness==cfg.brightness1) {
         // changing selected brightness, so update it
         lcdBrightness = String(w3srv.arg(i)).toInt();
-        M5.Lcd.setBrightness(lcdBrightness);
+        M5.Display.setBrightness(map(lcdBrightness, 0, 100, 0, 255));
       }
       cfg.brightness1 = String(w3srv.arg(i)).toInt();
     }
@@ -841,7 +842,7 @@ void handleGetEditConfigItem() {
       if(lcdBrightness==cfg.brightness2) {
         // changing selected brightness, so update it
         lcdBrightness = String(w3srv.arg(i)).toInt();
-        M5.Lcd.setBrightness(lcdBrightness);
+        M5.Display.setBrightness(map(lcdBrightness, 0, 100, 0, 255));
       }
       cfg.brightness2 = String(w3srv.arg(i)).toInt();
     }
@@ -849,7 +850,7 @@ void handleGetEditConfigItem() {
       if(lcdBrightness==cfg.brightness3) {
         // changing selected brightness, so update it
         lcdBrightness = String(w3srv.arg(i)).toInt();
-        M5.Lcd.setBrightness(lcdBrightness);
+        M5.Display.setBrightness(map(lcdBrightness, 0, 100, 0, 255));
       }
       cfg.brightness3 = String(w3srv.arg(i)).toInt();
     }
@@ -1058,9 +1059,7 @@ void handleSaveConfig() {
   
 
   if (cfg.is_task_bootstrapping) {
-    #ifndef ARDUINO_M5STACK_Core2  // no .update() on M5Stack CORE2
-      M5.update();
-    #endif
+    M5.update();
     WiFi.softAPdisconnect(true);
     delay(1000);
     ESP.restart();

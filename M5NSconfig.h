@@ -1,11 +1,7 @@
 #ifndef _M5NSCONFIG_H
 #define _M5NSCONFIG_H
 
-#ifdef ARDUINO_M5STACK_Core2
-  #include <M5Core2.h>
-#else
-  #include <M5Stack.h>
-#endif
+#include <M5Unified.h>
 
 #include "IniFile.h"
 

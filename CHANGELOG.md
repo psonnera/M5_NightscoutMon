@@ -3,6 +3,13 @@
 ## Revisions
 
 
+### 10 July 2026
+
+* Migrated to the **M5Unified** library. One board-agnostic firmware now builds for the whole current 16 MB lineup: **M5Stack Basic v2.7, Fire v2.7, Core2 v1.1 and CoreS3 (ESP32-S3)**. All the `#ifdef ARDUINO_M5STACK_Core2` conditionals are gone; the board is auto-detected at runtime.
+* Sound now goes through `M5.Speaker` (DAC on Basic/Fire, I2S on Core2/CoreS3) instead of the old hand-rolled DAC/I2S code. Brightness, buttons/touch and battery all use the unified `M5.Display` / `M5.BtnA-C` / `M5.Power` APIs.
+* Vibration motor, RGB LED strip and Micro Dot pHAT are now governed by `M5NS.INI` on every board (no longer force-disabled on Core2).
+* Build note: the classic Basic (`m5stack-core-esp32`) needs the `Minimal SPIFFS` partition scheme; the other boards fit the default partition.
+
 ### 2 October 2022
 
 * Updates for Railway (longer token, accept "trend" in addition to "direction", response count limited to 10).  
