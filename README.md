@@ -198,23 +198,6 @@ Another easier possibility is to download latest [M5Burner release](https://gith
 
 There is a Facebook group [M5STACK NIGHTSCOUT](https://www.facebook.com/groups/606295776549008/) where you can get support and installation guides in several languages prepared by members of the M5Stack Nightscout community. Please check the [Files section](https://www.facebook.com/groups/606295776549008/files/) first and search the group before asking questions. A lot of questions have been answered already. Big thanks to Patrick Sonnerat, Didier Frétigné, Peter Leimbach and more...
 
-### VSCode & Platform.IO Development
-
-* You can use VSCode & Platform.IO besides Arduino IDE for development.
-* For development use free [Visual Studio Code](https://code.visualstudio.com/)
-* Install Platform.IO addon in VSCode:
-  * open `Extensions` from left sidebar
-  * search for `Platform.IO` in extension search bar
-  * click green `Install` button and wait till it is installed
-* Unpack the M5_NightscoutMon_PlatformIO.zip to PlatformIO projects folder.
-* Copy the latest sources from GitHub root to PlatformIO project src folder (overwrite) and rename M5_NightscoutMon.ino to M5_NightscoutMon.cpp (the .zip dows not have to be updated to the latest version).
-* You can open project directly from VSCode `File -> Open folder...` menu, or from `PIO Home` with `Open project` button.
-* Project is already configured for Platform.IO & VSCode. During build it will download and configure all dependencies.
-* To **build** project press `PlatformIO: Build` button (it is white check mark icon `âś“` on the blue bottom toolbar)
-* To **upload** your project to the m5stack board:
-  * Connect your board via USB-C cable to your Laptop/PC
-  * press `PlatformIO: Upload` button (it is white right arrow icon `â†’` on the blue bottom toolbar)
-
 ### Donations
 
 If you find my project useful, I will appreciate if you donate me few bucks for further development or buy me a glass of beer or wine :wine_glass:.
