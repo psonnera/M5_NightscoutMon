@@ -4,6 +4,7 @@
 #include <Preferences.h>
 #include <WiFi.h>
 #include <WiFiMulti.h>
+#include <WiFiClientSecure.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <HTTPClient.h>
@@ -17,28 +18,30 @@
 #include "M5NSWebConfig.h"
 #include "externs.h"
 
-// OTA update files are hosted per board type. Select the subpath at runtime from the
-// detected board so one binary set works across the whole lineup.
-// NOTE: the "cores3" / "fire" paths must exist on the update host for OTA to work there.
-static const char* updateBoardPath() {
-  switch(M5.getBoard()) {
-    case m5gfx::board_t::board_M5StackCore2:
-      return "core2";
-    case m5gfx::board_t::board_M5StackCoreS3:
-    case m5gfx::board_t::board_M5StackCoreS3SE:
-      return "cores3";
-    default: // M5Stack Basic / Fire / Go
-      return "basic";
-  }
+// OTA firmware is served straight from this repo (raw.githubusercontent.com, master
+// branch, Binaries/ folder). Variant selection mirrors the three images actually
+// produced by Scripts/build.ps1 (see Binaries/firmware.json): Basic_4MB (min_spiffs
+// partitions, 4MB flash), ESP32_16MB (default partitions, 16MB flash - covers Basic
+// 16MB, Fire and all Core2), and CoreS3 (ESP32-S3). Selection is by chip + flash size,
+// not board model, since a "basic-looking" board can have either partition layout.
+static const char* updateVariantPath() {
+#if CONFIG_IDF_TARGET_ESP32S3
+  return "CoreS3";
+#else
+  return (ESP.getFlashChipSize() >= 16 * 1024 * 1024) ? "ESP32_16MB" : "Basic_4MB";
+#endif
 }
 static String updateURL(const char* file) {
-  return String("http://m5ns.goit.cz/update/") + updateBoardPath() + "/" + file;
+  return String("https://raw.githubusercontent.com/psonnera/M5_NightscoutMon/master/Binaries/")
+         + updateVariantPath() + "/" + file;
 }
 
 void handleRoot() {
   String webVer;
   String whatsNew;
   HTTPClient http;
+  WiFiClientSecure updateClient;
+  updateClient.setInsecure();
   IPAddress ip = WiFi.localIP();
   char tmpStr[64];
   char timeStr[20];
@@ -47,7 +50,7 @@ void handleRoot() {
   Serial.println("Serving root web page");
 
   if((WiFi.status() == WL_CONNECTED)) {
-    http.begin(updateURL("update.inf"));
+    http.begin(updateClient, updateURL("update.inf"));
     http.setTimeout(5000);
     http.setConnectTimeout(5000);
     int httpCode = http.GET();
@@ -61,7 +64,7 @@ void handleRoot() {
       Serial.println("Error getting update.inf");
     }
     http.end();
-    http.begin(updateURL("whatsnew.txt"));
+    http.begin(updateClient, updateURL("whatsnew.txt"));
     http.setTimeout(5000);
     http.setConnectTimeout(5000);
     httpCode = http.GET();
@@ -368,9 +371,10 @@ void handleUpdate() {
 
   String webVer;
   HTTPClient http;
-  WiFiClient client;
+  WiFiClientSecure client;
+  client.setInsecure();
   if((WiFi.status() == WL_CONNECTED)) {
-    http.begin(updateURL("update.inf"));
+    http.begin(client, updateURL("update.inf"));
     int httpCode = http.GET();
     if(httpCode > 0) {
       if(httpCode == HTTP_CODE_OK) {

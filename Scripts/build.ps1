@@ -76,6 +76,15 @@ $Targets = [ordered]@{
 # method on this core build. Harmless where not needed.
 $ExtraFlags = 'compiler.cpp.extra_flags=-Dgpio_deep_sleep_hold_dis=_NOP'
 
+# --- Firmware version (drives OTA's update.inf) -------------------------------
+# OTA (M5NSWebConfig.cpp) compares this string lexicographically, so it must stay
+# a fixed-width, zero-padded, monotonically increasing token (currently YYYYMMDDnn).
+$versionMatch = Select-String -Path $Sketch -Pattern 'String\s+M5NSversion\("([^"]+)"\)' | Select-Object -First 1
+if (-not $versionMatch) {
+    throw "Could not find M5NSversion in $Sketch"
+}
+$FirmwareVersion = $versionMatch.Matches[0].Groups[1].Value
+
 # --- Interactive menu (only if no -Target given) ------------------------------
 if (-not $Target) {
     Write-Host ''
@@ -124,6 +133,12 @@ foreach ($name in $toBuild) {
 
     # Keep only the flashable bins; drop the heavy .elf/.map debug artifacts (~40 MB/group).
     Get-ChildItem $outDir -Include *.elf, *.map -File -Recurse | Remove-Item -Force
+
+    # OTA (M5NSWebConfig.cpp) pulls this file to decide whether a newer firmware is
+    # available; regenerate it every build so it always matches what was just built.
+    # whatsnew.txt is hand-authored and intentionally left untouched here.
+    $infPath = Join-Path $outDir 'update.inf'
+    Set-Content -Path $infPath -Value $FirmwareVersion -NoNewline -Encoding ascii
 
     $results += $name
 }
