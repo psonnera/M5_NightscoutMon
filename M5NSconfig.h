@@ -70,8 +70,7 @@ struct NSinfo {
   float sensSgvMgDl = 0;
   float sensSgv = 0;
   float last10sgv[10];
-  bool is_xDrip = 0;  
-  bool is_Sugarmate = 0;  
+  bool is_xDrip = 0;
   int arrowAngle = 180;
   float iob = 0;
   char iob_display[16];

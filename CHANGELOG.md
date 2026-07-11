@@ -3,6 +3,17 @@
 ## Revisions
 
 
+### 11 July 2026 (remove Sugarmate integration)
+
+* Removed the obsolete Sugarmate follower workaround (`is_Sugarmate` detection/parsing path, used historically for Dexcom via `sugarmate.io` JSON URLs). Only the native Nightscout API path remains; behavior for Nightscout users is unchanged.
+
+### 11 July 2026 (font size fix)
+
+* Fixed all on-screen text rendering tiny after the M5Unified migration. Every `drawString`/`drawNumber` call passed `GFXFF` (=1) as the trailing font-number argument. Under the old M5Stack/TFT_eSPI library this meant "use the free font set by `setFreeFont`", but M5GFX interprets the integer as a built-in font index, overriding the free font with its small `Font1`. Dropped the `, GFXFF` argument from all 59 calls so the current free font (and its `setTextSize` scaling) is honored again.
+* Bumped the displayed firmware version (Info page) to `2026071101`.
+* Fixed the bottom info row (`L: ... B: ...`, `Snooze`, `LOOP`/`ERR`, sensor info) overlapping the button area. M5GFX positions free-font text lower than the old TFT_eSPI (it reserves the full-font ascent+descender), so `TL_DATUM` at y=220 pushed the baseline past the 240 px screen edge. The row is now bottom-anchored (`BL_DATUM`, y=240) so it stays on screen.
+* Fixed the large BG value on the big-number screen (page 2) sitting too high. `MC_DATUM` centres M5GFX's full font cell (ascent + descender), but the value is digits only, so the glyphs floated up. The draw anchor is now shifted down by descender×textSize/2 (FSSB24 → y=144, FSSB18 → y=136) to visually centre the digits again.
+
 ### 10 July 2026 (build scripts)
 
 * Added `Scripts/build.ps1` + `Scripts/build.bat` to compile the **minimum firmware set** for the whole lineup into `Binaries/`. Three groups, split by chip + flash: **Basic_4MB** (old 4 MB Basic, `min_spiffs`), **ESP32_16MB** (Basic 16 MB, Fire and all Core2 — `default` 16 MB layout, PSRAM off), and **CoreS3** (ESP32-S3). The 16 MB boards now get 6.25 MiB OTA slots, so the app can grow and still update over-the-air without a repartition/USB reflash. See `Scripts/README.md`.

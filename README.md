@@ -8,7 +8,7 @@
 ###### This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 ###### This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
 ###### You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>. 
-###### This software uses some 3rd party libraries:<br/>IniFile by Steve Marple (GNU LGPL v2.1)<br/>ArduinoJson by Benoit BLANCHON (MIT License)<br/>IoT Icon Set by Artur Funk (GPL v3)<br/>DHT12 by Bobadas (Public domain)<br/><br/>Additions to the code:<br/>Peter Leimbach (Nightscout token)<br/>Patrick Sonnerat (Dexcom Sugarmate connection)<br/>Sulka Haro (Nightscout API queries help)<br/>Dominik Dzienia _(Refactoring, migration to Platform.IO)_
+###### This software uses some 3rd party libraries:<br/>IniFile by Steve Marple (GNU LGPL v2.1)<br/>ArduinoJson by Benoit BLANCHON (MIT License)<br/>IoT Icon Set by Artur Funk (GPL v3)<br/>DHT12 by Bobadas (Public domain)<br/><br/>Additions to the code:<br/>Peter Leimbach (Nightscout token)<br/>Sulka Haro (Nightscout API queries help)<br/>Dominik Dzienia _(Refactoring, migration to Platform.IO)_
 
 ### Contents
 [What is this good for?](#m5stack-nightscout-monitor-1)  
