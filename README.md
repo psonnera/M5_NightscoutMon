@@ -19,6 +19,7 @@
 [Buttons](#buttons)  
 [Battery](#battery)  
 [Installation and support](#installation-and-support)  
+[Firmware updates (OTA)](#firmware-updates-ota)  
 [Donations - support the project](#donations) :+1:
 
 
@@ -197,6 +198,14 @@ Installation can be done by download or git clone the code to the Arduino IDE en
 Another easier possibility is to download latest [M5Burner release](https://github.com/mlukasek/M5_NightscoutMon/releases). It is Windows executable with binary M5Stack firmware included. Just unzip it, start the M5Burner.exe, choose COM port where your M5Stack is connected and burn the firmware. Simple. Remember to add you microSD card with M5NS.INI configuration file. See the [wiki](https://github.com/mlukasek/M5_NightscoutMon/wiki) for details.
 
 There is a Facebook group [M5STACK NIGHTSCOUT](https://www.facebook.com/groups/606295776549008/) where you can get support and installation guides in several languages prepared by members of the M5Stack Nightscout community. Please check the [Files section](https://www.facebook.com/groups/606295776549008/files/) first and search the group before asking questions. A lot of questions have been answered already. Big thanks to Patrick Sonnerat, Didier Frétigné, Peter Leimbach and more...
+
+### Firmware updates (OTA)
+
+Once your M5Stack is set up and connected to Wi-Fi, you don't need a computer to keep it up to date. Open the device's web page (see [Setup](https://github.com/psonnera/M5_NightscoutMon/wiki/Setup#update-your-firmware) in the wiki) and, if a newer version is available, a **click to update** link appears. Click it and the device downloads and flashes the new firmware itself, then reboots.
+
+Firmware is served directly from this GitHub repository — the [`Binaries/`](Binaries) folder on `master` — over HTTPS; there is no separate update server. The device automatically requests the binary matching its own board (`Basic_4MB`, `ESP32_16MB` or `CoreS3`, see [`Scripts/README.md`](Scripts/README.md#the-three-firmwares)), so a Basic, Fire, Core2 or CoreS3 all get the correct image without any manual selection.
+
+If you maintain your own fork, see [`Scripts/README.md`](Scripts/README.md#publishing-an-ota-update) for how to build and publish updates for it.
 
 ### Donations
 
