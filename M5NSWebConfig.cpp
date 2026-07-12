@@ -48,6 +48,9 @@ static String updateURL(const char* file) {
 // and that's the only way it needs to be cleared.
 static bool restartPending = false;
 
+// Defined further down (shared by handleSaveConfig() and handleGetEditConfigItem()).
+static void persistConfigToDisk();
+
 static void pageHeadOpen(String& m, const char* extraMeta) {
   m += "<!DOCTYPE HTML>\r\n<html>\r\n<head>\r\n";
   m += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\r\n";
@@ -816,7 +819,6 @@ void handleEditConfigItem() {
   String sgvUnits = cfg.show_mgdl?"mg/dL":"mmol/L";
   int decpl = cfg.show_mgdl?0:1;
   int mult = cfg.show_mgdl?18:1;
-  int numSsids = WiFi.scanNetworks( );
   String sec = w3srv.hasArg("s") ? w3srv.arg("s") : String("st");
 
   String message;
@@ -880,6 +882,10 @@ void handleEditConfigItem() {
       editRow(message, "Vibration strength", "<input type=\"text\" name=\"vibration_strength\" value=\"" + String(cfg.vibration_strength) + "\" size=\"3\" maxlength=\"3\">", "0-1023, recommended 256-512 - higher can crash the M5Stack");
     }
     if(String(w3srv.arg(0)).equals("wlans")) {
+      // Only scan here, not on every edit-item page: on ESP32 an AP-mode scan needs to
+      // channel-hop, which can knock already-connected SoftAP clients (like the phone
+      // filling out this very form) off the network mid-scan.
+      int numSsids = WiFi.scanNetworks();
       for(int i=1; i<10; i++) {
         String ssidInput;
         if (cfg.wlanssid[i][0] != 0) {
@@ -917,6 +923,7 @@ void handleGetEditConfigItem() {
   // int decpl = cfg.show_mgdl?0:1;
   float mult = cfg.show_mgdl?18.0:1.0;
   String tmpStr;
+  bool wlanChanged = false;
 
   String sec = "st";
   for (uint8_t i = 0; i < w3srv.args(); i++) {
@@ -1056,7 +1063,7 @@ void handleGetEditConfigItem() {
       tmpStr.remove(0, 8);
       int nr = tmpStr.toInt();
       String newVal = String(w3srv.arg(i));
-      if(!newVal.equals(cfg.wlanssid[nr])) restartPending = true;
+      if(!newVal.equals(cfg.wlanssid[nr])) { restartPending = true; wlanChanged = true; }
       message += "WLAN SSID [" + tmpStr + "] = " + newVal + " (" + newVal.length() + ")<br />\r\n";
       strncpy(cfg.wlanssid[nr], newVal.c_str(), 32);
     }
@@ -1065,7 +1072,7 @@ void handleGetEditConfigItem() {
       tmpStr.remove(0, 8);
       int nr = tmpStr.toInt();
       String newVal = String(w3srv.arg(i));
-      if(!newVal.equals(cfg.wlanpass[nr])) restartPending = true;
+      if(!newVal.equals(cfg.wlanpass[nr])) { restartPending = true; wlanChanged = true; }
 
       // message += "WLAN PASS [" + tmpStr + "] = " + String(w3srv.arg(i)) + " (" + String(w3srv.arg(i)).length() + ")<br />\r\n";
 
@@ -1076,6 +1083,18 @@ void handleGetEditConfigItem() {
       strncpy(cfg.wlanpass[nr], String(w3srv.arg(i)).c_str(), 64);
     }
   }
+
+  // WiFi networks can't wait for a separate trip to the "Save configuration" button like every
+  // other setting: losing an entered network here traps the user in an endless re-bootstrap
+  // loop (a fresh random SoftAP passphrase every reboot, no way back to what was just typed).
+  // So in bootstrap mode, persist to SD + flash immediately and tell the user plainly that a
+  // restart is what's needed next - this also means the credentials are safely on disk before
+  // the HTTP response is even sent, in case the page itself never finishes loading.
+  if(wlanChanged && cfg.is_task_bootstrapping) {
+    persistConfigToDisk();
+    message += "<p><b>WiFi settings saved.</b> Restart the device now to connect using the new network.</p>\r\n";
+  }
+
   message += "</body>\r\n";
   message += "</html>\r\n";
   w3srv.send(200, "text/html", message);
@@ -1083,42 +1102,26 @@ void handleGetEditConfigItem() {
   if (!cfg.is_task_bootstrapping) {
     M5.Lcd.fillScreen(BLACK);
     draw_page();
-    if(cfg.LED_strip_mode != 0) { 
+    if(cfg.LED_strip_mode != 0) {
       pixels.show();
     }
   }
 }
 
-void handleSaveConfig() {
+// Full SD M5NS.INI (with a M5NS.BAK backup) + NVS flash write of the current in-RAM cfg.
+// Shared by handleSaveConfig() (the explicit "Save" button) and, in bootstrap mode,
+// handleGetEditConfigItem() (WiFi networks only - see the call site there for why).
+static void persistConfigToDisk() {
   String sgvUnits = cfg.show_mgdl?"mg/dL":"mmol/L";
   int decpl = cfg.show_mgdl?0:1;
   int mult = cfg.show_mgdl?18:1;
-  String tmpStr;
 
-  // Bootstrap mode always restarts once configured (existing behavior); otherwise restart
-  // only if an edited item that needs it (device name, time zone/DST, WiFi networks) was
-  // actually changed - tracked in handleGetEditConfigItem() via restartPending.
-  bool willRestart = cfg.is_task_bootstrapping || restartPending;
-
-  String message;
-  message.reserve(768);
-  pageHeadOpen(message, willRestart
-    ? "<meta http-equiv=\"refresh\" content=\"5;url=/\" />\r\n"
-    : "<meta http-equiv=\"refresh\" content=\"2;url=/\" />\r\n");
-  message += "<p>Saving configuration to M5NS.INI file.</p>\r\n";
-  message += "<p>Backup copy of current M5NS.INI should be blaced in M5NS.BAK file.</p>\r\n";
-  if (willRestart) {
-    message += "<p><b>Restarting to apply changes...</b></p>\r\n";
-  }
-  message += "</body>\r\n";
-  message += "</html>\r\n";
-  
   M5.Lcd.drawJpgFile(SD, cfg.bootPic);
 
   File srcFil, dstFil;
 
   Serial.println("Creating backup copy of M5NS.INI to M5NS.BAK");
-  
+
   if(!SD.remove("/M5NS.BAK")) {
     Serial.println("Error removing M5NS.BAK");
   }
@@ -1131,7 +1134,7 @@ void handleSaveConfig() {
       Serial.println("Error opening M5NS.BAK for write");
     } else {
       if(srcFil.size()>0) {
-        size_t n; 
+        size_t n;
         uint8_t buf[256];
         while ((n = srcFil.read(buf, sizeof(buf))) > 0) {
           dstFil.write(buf, n);
@@ -1144,7 +1147,7 @@ void handleSaveConfig() {
       }
     }
   }
-  
+
   if(!SD.remove("/M5NS.INI")) {
     Serial.println("Error removing M5NS.BAK");
   }
@@ -1228,6 +1231,28 @@ void handleSaveConfig() {
   }
 
   saveConfigToFlash(&cfg);
+}
+
+void handleSaveConfig() {
+  // Bootstrap mode always restarts once configured (existing behavior); otherwise restart
+  // only if an edited item that needs it (device name, time zone/DST, WiFi networks) was
+  // actually changed - tracked in handleGetEditConfigItem() via restartPending.
+  bool willRestart = cfg.is_task_bootstrapping || restartPending;
+
+  String message;
+  message.reserve(768);
+  pageHeadOpen(message, willRestart
+    ? "<meta http-equiv=\"refresh\" content=\"5;url=/\" />\r\n"
+    : "<meta http-equiv=\"refresh\" content=\"2;url=/\" />\r\n");
+  message += "<p>Saving configuration to M5NS.INI file.</p>\r\n";
+  message += "<p>Backup copy of current M5NS.INI should be blaced in M5NS.BAK file.</p>\r\n";
+  if (willRestart) {
+    message += "<p><b>Restarting to apply changes...</b></p>\r\n";
+  }
+  message += "</body>\r\n";
+  message += "</html>\r\n";
+
+  persistConfigToDisk();
 
   w3srv.send(200, "text/html", message);
   delay(100);
