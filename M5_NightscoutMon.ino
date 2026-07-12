@@ -68,7 +68,7 @@ SHT3X sht30;
 #include "microdot.h"
 MicroDot MD;
 
-String M5NSversion("2026071101");
+String M5NSversion("2026071201");
 
 #define VIBfreq 10000
 #define VIBchannel 14
@@ -629,6 +629,11 @@ void wifi_connect() {
     M5.Lcd.print(".local\n");
     M5.Lcd.print("IP address: ");
     M5.Lcd.println(WiFi.softAPIP());
+
+    // Most phone camera apps recognize this format natively and offer to join with one tap.
+    char wifiQR[96];
+    snprintf(wifiQR, sizeof(wifiQR), "WIFI:S:%s;T:WPA;P:%s;;", cfg.deviceName, ssid_passphrase);
+    M5.Lcd.qrcode(wifiQR, M5.Lcd.width() - 104, M5.Lcd.height() - 104, 100, 3);
   } else {
     Serial.println(WiFi.SSID());
     M5.Lcd.print("WiFi SSID: "); M5.Lcd.println(WiFi.SSID());
