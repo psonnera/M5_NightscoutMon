@@ -8,7 +8,7 @@
 ###### This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 ###### This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
 ###### You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>. 
-###### This software uses some 3rd party libraries:<br/>IniFile by Steve Marple (GNU LGPL v2.1)<br/>ArduinoJson by Benoit BLANCHON (MIT License)<br/>IoT Icon Set by Artur Funk (GPL v3)<br/>DHT12 by Bobadas (Public domain)<br/><br/>Additions to the code:<br/>Peter Leimbach (Nightscout token)<br/>Sulka Haro (Nightscout API queries help)<br/>Dominik Dzienia _(Refactoring, migration to Platform.IO)_
+###### This software uses some 3rd party libraries:<br/>IniFile by Steve Marple (GNU LGPL v2.1)<br/>ArduinoJson by Benoit BLANCHON (MIT License)<br/>IoT Icon Set by Artur Funk (GPL v3)<br/>DHT12 by Bobadas (Public domain)<br/><br/>Additions to the code:<br/>Peter Leimbach (Nightscout token)<br/>Sulka Haro (Nightscout API queries help)<br/>Dominik Dzienia _(Refactoring, migration to Platform.IO)_<br/>The Dexcom Share ("Follow") data source (`M5NSDexcom.cpp`/`.h`) was adapted from the Dexcom Share protocol implementation in [ktomy/nightscout-clock](https://github.com/ktomy/nightscout-clock) (`BGSourceDexcom`), which is licensed under the [GNU LGPL v2.1](https://github.com/ktomy/nightscout-clock/blob/main/LICENSE).
 
 ### Contents
 [What is this good for?](#m5stack-nightscout-monitor-1)  
@@ -45,9 +45,14 @@ If you know what to do with it, just download the code, modify it any way it sui
 ```ini
 [config]
 
-nightscout = yoursite.herokuapp.com ; use your Nightscout site URL
+data_source = 0                     ; glucose data source: 0 = Nightscout (default), 1 = Dexcom Share, 2 = LibreLinkUp (not yet supported)
+nightscout = yournightscoutsite.com ; use your Nightscout site URL (any host - Fly.io, Render, Azure, self-hosted, etc.)
 token = security token              ; token for access secured Nightscout site, 
                                     ; if public Nightscout site is used, delete token line and do not use it
+dexcom_user = your_dexcom_account   ; Dexcom Share account name, only used when data_source = 1
+dexcom_pass = your_dexcom_password  ; Dexcom Share password, stored in plain text like token/wifi passwords above
+                                    ; use the SHARING account, not a follower account
+dexcom_server = 0                   ; Dexcom server region: 0 = US, 1 = outside US, 2 = Japan
 bootpic = /M5_NightscoutMon.jpg     ; boot picture
 name = YourName                     ; display name
 device_name = M5NS                  ; device name for mDNS, that can be used to  access the device from local

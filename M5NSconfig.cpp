@@ -50,6 +50,10 @@ void readConfigFromFlash(tConfig *cfg) {
     Serial.println("Reading configuration from Preferences M5NSconfig");
     prefs.getString("nightscout", cfg->url, 128);
     prefs.getString("token", cfg->token, 64);
+    cfg->data_source = prefs.getInt("data_source", 0);
+    prefs.getString("dexcom_user", cfg->dexcom_user, 64);
+    prefs.getString("dexcom_pass", cfg->dexcom_pass, 64);
+    cfg->dexcom_server = prefs.getInt("dexcom_server", 0);
     prefs.getString("bootpic", cfg->bootPic, 64);
     prefs.getString("user_name", cfg->userName, 32);
     if(strlen(cfg->userName)==0)
@@ -138,6 +142,10 @@ void saveConfigToFlash(tConfig *cfg) {
     prefs.clear();
     prefs.putString("nightscout", cfg->url);
     prefs.putString("token", cfg->token);
+    prefs.putInt("data_source", cfg->data_source);
+    prefs.putString("dexcom_user", cfg->dexcom_user);
+    prefs.putString("dexcom_pass", cfg->dexcom_pass);
+    prefs.putInt("dexcom_server", cfg->dexcom_server);
     prefs.putString("bootpic", cfg->bootPic);
     prefs.putString("user_name", cfg->userName);
     prefs.putString("device_name", cfg->deviceName);
@@ -254,6 +262,20 @@ void readConfiguration(const char *iniFilename, tConfig *cfg) {
       ;
   }
   
+  // Data source must be known before validating the nightscout URL below, since a
+  // Dexcom/LibreLinkUp-only INI legitimately has no 'nightscout' key.
+  if (ini.getValue("config", "data_source", buffer, bufferLen)) {
+    Serial.print("data_source = ");
+    cfg->data_source = atoi(buffer);
+    Serial.println(cfg->data_source);
+  }
+  else {
+    Serial.println("NO data_source defined -> 0 = Nightscout");
+    cfg->data_source = 0;
+  }
+  if (cfg->data_source < 0 || cfg->data_source > 2)
+    cfg->data_source = 0;
+
   // Fetch a value from a key which is present
   if (ini.getValue("config", "nightscout", buffer, bufferLen)) {
     Serial.print("section 'config' has an entry 'nightscout' with value ");
@@ -265,8 +287,9 @@ void readConfiguration(const char *iniFilename, tConfig *cfg) {
     printErrorMessage(ini.getError());
     M5.Lcd.println("No Nightscout URL in INI file");
     // while (1);
-    // Go into bootstrapping mode.
-    cfg->is_task_bootstrapping = 1;
+    // Go into bootstrapping mode, unless a non-Nightscout data source is configured.
+    if (cfg->data_source == 0)
+      cfg->is_task_bootstrapping = 1;
     // cfg->url[0] = '\0';
   }
 
@@ -282,6 +305,37 @@ void readConfiguration(const char *iniFilename, tConfig *cfg) {
     cfg->token[0] = '\0';
   }
   // end Peter Leimbach
+
+  if (ini.getValue("config", "dexcom_user", buffer, bufferLen)) {
+    Serial.print("dexcom_user = ");
+    Serial.println(buffer);
+    strlcpy(cfg->dexcom_user, buffer, 64);
+  }
+  else {
+    Serial.println("NO dexcom_user defined");
+    cfg->dexcom_user[0] = '\0';
+  }
+
+  if (ini.getValue("config", "dexcom_pass", buffer, bufferLen)) {
+    Serial.println("dexcom_pass defined");
+    strlcpy(cfg->dexcom_pass, buffer, 64);
+  }
+  else {
+    Serial.println("NO dexcom_pass defined");
+    cfg->dexcom_pass[0] = '\0';
+  }
+
+  if (ini.getValue("config", "dexcom_server", buffer, bufferLen)) {
+    Serial.print("dexcom_server = ");
+    cfg->dexcom_server = atoi(buffer);
+    Serial.println(cfg->dexcom_server);
+  }
+  else {
+    Serial.println("NO dexcom_server defined -> 0 = US");
+    cfg->dexcom_server = 0;
+  }
+  if (cfg->dexcom_server < 0 || cfg->dexcom_server > 2)
+    cfg->dexcom_server = 0;
 
   if (ini.getValue("config", "bootpic", buffer, bufferLen)) {
     Serial.print("bootpic = ");

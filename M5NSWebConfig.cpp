@@ -16,6 +16,7 @@
 #include "IniFile.h"
 #include "M5NSconfig.h"
 #include "M5NSWebConfig.h"
+#include "M5NSDexcom.h"
 #include "externs.h"
 
 // OTA firmware is served straight from this repo (raw.githubusercontent.com, master
@@ -34,6 +35,21 @@ static const char* updateVariantPath() {
 static String updateURL(const char* file) {
   return String("https://raw.githubusercontent.com/psonnera/M5_NightscoutMon/master/Binaries/")
          + updateVariantPath() + "/" + file;
+}
+
+static const char* dataSourceName(int ds) {
+  switch(ds) {
+    case 1: return "Dexcom Share";
+    case 2: return "LibreLinkUp";
+    default: return "Nightscout";
+  }
+}
+static const char* dexcomServerName(int s) {
+  switch(s) {
+    case 1: return "Outside US (shareous1.dexcom.com)";
+    case 2: return "Japan (share.dexcom.jp)";
+    default: return "US (share1.dexcom.com)";
+  }
 }
 
 void handleRoot() {
@@ -206,6 +222,12 @@ void handleRoot() {
 
   message += "<p><b>Current configuration</b><br />\r\n";
   message += "Nightscout URL: "; message += "<a href=\""; message += NSurl; message += "\"><b>"; message += NSurl; message += "</b></a> <a href=\"edititem?param=NSurl\">[edit]</a><br />\r\n";
+  message += "Data source: <b>"; message += dataSourceName(cfg.data_source); message += "</b> <a href=\"switch?param=data_source\">[change]</a><br />\r\n";
+  message += "Dexcom Share account: <b>"; message += (strlen(cfg.dexcom_user)>0 ? cfg.dexcom_user : "(not set)");
+  message += " / ";
+  for(int j=0; j<(int)strlen(cfg.dexcom_pass); j++)
+    message += "*";
+  message += "</b> ("; message += dexcomServerName(cfg.dexcom_server); message += ") <a href=\"edititem?param=dexcom\">[edit]</a><br />\r\n";
   message += "User name: <b>"; message += cfg.userName; message += "</b> <a href=\"edititem?param=userName\">[edit]</a><br />\r\n";
   message += "Device name: <b>"; message += cfg.deviceName; message += "</b> <a href=\"edititem?param=deviceName\">[edit]</a><br />\r\n";
   message += "Time offset: <b>"; message += cfg.timeZone; message += " seconds</b> <a href=\"edititem?param=timeZoneDST\">[edit]</a><br />\r\n";
@@ -475,6 +497,13 @@ void handleSwitchConfig() {
   */
   for (uint8_t i = 0; i < w3srv.args(); i++) {
     if(String(w3srv.argName(i)).equals("param")) {
+      if(String(w3srv.arg(i)).equals("data_source")) {
+        cfg.data_source++;
+        if(cfg.data_source > 1) // bump to >2 once LibreLinkUp is implemented
+          cfg.data_source = 0;
+        dexcomResetSession();
+        ns.sensTime = 0; // force an immediate refetch from the newly selected source
+      }
       if(String(w3srv.arg(i)).equals("show_mgdl")) {
         cfg.show_mgdl = !cfg.show_mgdl;
         // Serial.print("show_mgdl = "); Serial.println(cfg.show_mgdl);
@@ -622,10 +651,25 @@ void handleEditConfigItem() {
     if(String(w3srv.arg(0)).equals("NSurl")) {
       message += "Nightscout site URL: \r\n";
       message += "<input type=\"text\" name=\"url\" value=\"" + String(cfg.url) + "\" size=\"32\" maxlength=\"128\"> \r\n";
-      message += " (for example <i>sitename.herokuapp.com</i>)<br>\r\n";
+      message += " (for example <i>yournightscoutsite.com</i>)<br>\r\n";
       message += "Security token: \r\n";
       message += "<input type=\"text\" name=\"token\" value=\"" + String(cfg.token) + "\" size=\"64\" maxlength=\"64\"> \r\n";
       message += " (empty, if not used)<br>\r\n";
+    }
+    if(String(w3srv.arg(0)).equals("dexcom")) {
+      message += "Dexcom Share username: \r\n";
+      message += "<input type=\"text\" name=\"dexcom_user\" value=\"" + String(cfg.dexcom_user) + "\" size=\"32\" maxlength=\"63\"><br>\r\n";
+      message += "Dexcom Share password: \r\n";
+      message += "<input type=\"password\" name=\"dexcom_pass\" value=\"" + String(cfg.dexcom_pass) + "\" size=\"32\" maxlength=\"63\"><br>\r\n";
+      message += "Dexcom server: \r\n";
+      message += "<select name=\"dexcom_server\">\r\n";
+      message += "<option value=\"0\""; if(cfg.dexcom_server==0) message += " selected"; message += ">US (share1.dexcom.com)</option>\r\n";
+      message += "<option value=\"1\""; if(cfg.dexcom_server==1) message += " selected"; message += ">Outside US (shareous1.dexcom.com)</option>\r\n";
+      message += "<option value=\"2\""; if(cfg.dexcom_server==2) message += " selected"; message += ">Japan (share.dexcom.jp)</option>\r\n";
+      message += "</select><br>\r\n";
+      message += "Use the Dexcom account that SHARES glucose data (not a follower account). ";
+      message += "This is only used when data source is set to Dexcom Share.<br>\r\n";
+      message += "<font color=red>Password is stored on the device SD card / flash in plain text.</font><br>\r\n";
     }
     if(String(w3srv.arg(0)).equals("deviceName")) {
       message += "M5Stack device name: \r\n";
@@ -778,6 +822,18 @@ void handleGetEditConfigItem() {
     }
     if(String(w3srv.argName(i)).equals("token")) {
       strncpy(cfg.token, String(w3srv.arg(i)).c_str(), 64);
+    }
+    if(String(w3srv.argName(i)).equals("dexcom_user")) {
+      strncpy(cfg.dexcom_user, String(w3srv.arg(i)).c_str(), 64);
+      dexcomResetSession();
+    }
+    if(String(w3srv.argName(i)).equals("dexcom_pass")) {
+      strncpy(cfg.dexcom_pass, String(w3srv.arg(i)).c_str(), 64);
+      dexcomResetSession();
+    }
+    if(String(w3srv.argName(i)).equals("dexcom_server")) {
+      cfg.dexcom_server = String(w3srv.arg(i)).toInt();
+      dexcomResetSession();
     }
     if(String(w3srv.argName(i)).equals("deviceName")) {
       strncpy(cfg.deviceName, String(w3srv.arg(i)).c_str(), 32);
@@ -984,6 +1040,10 @@ void handleSaveConfig() {
     dstFil.print("[config]\r\n");
     dstFil.print("nightscout = "); dstFil.print(cfg.url); dstFil.print("\r\n");
     dstFil.print("token = "); dstFil.print(cfg.token); dstFil.print("\r\n");
+    dstFil.print("data_source = "); dstFil.print(cfg.data_source); dstFil.print("\r\n");
+    dstFil.print("dexcom_user = "); dstFil.print(cfg.dexcom_user); dstFil.print("\r\n");
+    dstFil.print("dexcom_pass = "); dstFil.print(cfg.dexcom_pass); dstFil.print("\r\n");
+    dstFil.print("dexcom_server = "); dstFil.print(cfg.dexcom_server); dstFil.print("\r\n");
     dstFil.print("bootpic = "); dstFil.print(cfg.bootPic); dstFil.print("\r\n");
     dstFil.print("name = "); dstFil.print(cfg.userName); dstFil.print("\r\n");
     dstFil.print("device_name = "); dstFil.print(cfg.deviceName); dstFil.print("\r\n");

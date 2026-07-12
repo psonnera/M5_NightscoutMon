@@ -3,6 +3,10 @@
 ## Revisions
 
 
+### 12 July 2026 (Dexcom Share data source)
+
+* Added Dexcom Share ("Follow") as an alternative glucose data source, selectable via the new `data_source` setting (0 = Nightscout, 1 = Dexcom Share). Only one source is active at a time. New config: `dexcom_user`, `dexcom_pass`, `dexcom_server` (US/outside US/Japan), settable via `M5NS.INI`, NVS flash, or the web config UI (`data_source` row directly below the Nightscout URL on the status page). Fetch logic lives in the new `M5NSDexcom.cpp`/`.h`, dispatched from a new `readDataSource()` alongside the existing `readNightscout()`. TLS uses `WiFiClientSecure::setInsecure()`, matching the existing OTA/non-Heroku pattern. Architecture reserves `data_source = 2` for a future LibreLinkUp (LibreView) source.
+
 ### 11 July 2026 (remove Sugarmate integration)
 
 * Removed the obsolete Sugarmate follower workaround (`is_Sugarmate` detection/parsing path, used historically for Dexcom via `sugarmate.io` JSON URLs). Only the native Nightscout API path remains; behavior for Nightscout users is unchanged.
