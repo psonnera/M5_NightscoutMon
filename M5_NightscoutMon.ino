@@ -68,7 +68,7 @@ SHT3X sht30;
 #include "microdot.h"
 MicroDot MD;
 
-String M5NSversion("2026071204");
+String M5NSversion("2026071206");
 
 #define VIBfreq 10000
 #define VIBchannel 14
@@ -642,14 +642,22 @@ void wifi_connect() {
     M5.Lcd.setCursor(4, 68);
     M5.Lcd.println(ssid_passphrase);
 
-    M5.Lcd.setTextSize(1);
+    // ".local" mDNS can't resolve before the phone has even joined this AP, and is
+    // unreliable from phones even after - the wildcard captive-portal DNS below
+    // (dnsServer.start(DNS_PORT, "*", ip)) answers every lookup with the device's own
+    // IP, so most phones auto-prompt to open the config page once joined; the IP is
+    // the reliable fallback if that prompt doesn't appear.
+    M5.Lcd.setTextSize(2);
     M5.Lcd.setCursor(4, 96);
-    M5.Lcd.println("Or visit:");
-    M5.Lcd.setCursor(4, 110);
-    M5.Lcd.print("http://");
-    M5.Lcd.print(cfg.deviceName);
-    M5.Lcd.println(".local");
-    M5.Lcd.setCursor(4, 124);
+    M5.Lcd.println("Then open");
+    M5.Lcd.setCursor(4, 116);
+    M5.Lcd.println("your browser");
+
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setCursor(4, 142);
+    M5.Lcd.println("If not prompted,");
+    M5.Lcd.setCursor(4, 156);
+    M5.Lcd.print("visit ");
     M5.Lcd.println(WiFi.softAPIP());
 
     M5.Lcd.setCursor(165, 26);
@@ -2421,8 +2429,15 @@ void setup() {
       Serial.println("ERROR: Could not startMDNS responder.");
       mDNSactive = false;
     }
-    if(cfg.disable_web_server==0) {
+    // Bootstrap (SoftAP) mode ALWAYS serves the config page, even when the user disabled the
+    // web server. Otherwise disabling it is a one-way door: the page you would use to re-enable
+    // it is the page that just disappeared, and on a device with no SD card (no M5NS.INI to
+    // hand-edit) the only way back would be a USB reflash. Holding BtnA at boot is therefore the
+    // universal recovery path. This also fixes loop() calling w3srv.handleClient() while
+    // bootstrapping against a server that was never begun.
+    if(cfg.disable_web_server==0 || is_task_bootstrapping) {
       w3srv.on("/", handleRoot);
+      w3srv.on("/fwcheck", handleFwCheck);
       w3srv.on("/update", handleUpdate);
       w3srv.on("/savecfg", handleSaveConfig);
       w3srv.on("/switch", handleSwitchConfig);

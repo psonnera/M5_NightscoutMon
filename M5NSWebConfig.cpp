@@ -36,12 +36,98 @@ static String updateURL(const char* file) {
          + updateVariantPath() + "/" + file;
 }
 
+// ---- Shared page chrome + compact row renderers --------------------------------
+// Settings are grouped into collapsible <details> sections (native HTML, no JS
+// framework) and rendered via these row helpers instead of one-line-per-setting
+// string concatenation, so the generated HTML stays small and reserve() up front
+// avoids the repeated String reallocation the old ~230-concatenation build had.
+
+// Set when an edited item needs a device restart to take effect (device name, time zone/DST,
+// WiFi networks); read by handleRoot() to show a warning banner and by handleSaveConfig() to
+// restart automatically after writing M5NS.INI. Lives only in RAM - a real restart clears it,
+// and that's the only way it needs to be cleared.
+static bool restartPending = false;
+
+static void pageHeadOpen(String& m, const char* extraMeta) {
+  m += "<!DOCTYPE HTML>\r\n<html>\r\n<head>\r\n";
+  m += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\r\n";
+  if (extraMeta && extraMeta[0]) m += extraMeta;
+  m += "<style>\r\n";
+  m += "body{font-family:-apple-system,\"Segoe UI\",Roboto,Arial,sans-serif;font-size:15px;margin:0;padding:10px;max-width:480px}\r\n";
+  m += "h1{font-size:19px;margin:4px 0 12px}\r\n";
+  m += "details{border:1px solid #ccc;border-radius:6px;margin-bottom:6px;background:#fff}\r\n";
+  m += "summary{font-weight:600;padding:10px;cursor:pointer}\r\n";
+  m += ".row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px;padding:7px 10px;border-top:1px solid #eee}\r\n";
+  m += ".row>span:first-child{color:#555;margin-right:8px}\r\n";
+  m += "select,input[type=text],input[type=password]{font-size:15px;padding:5px}\r\n";
+  m += "a{color:#06c;text-decoration:none}\r\n";
+  m += ".y{color:#BB9900}.r{color:#c00}.t{color:teal}\r\n";
+  m += ".btn{display:inline-block;background:#4CAF50;color:#fff !important;padding:10px 18px;border-radius:4px;font-weight:600;margin:6px 0;border:none;font-size:15px}\r\n";
+  m += ".btn2{display:inline-block;background:#999;color:#fff !important;padding:10px 18px;border-radius:4px;font-weight:600;margin:6px 0 6px 6px;border:none;font-size:15px}\r\n";
+  m += ".sw{display:inline-block;min-width:40px;text-align:center;padding:5px 10px;border-radius:12px;background:#bbb;color:#fff !important;font-size:12px;font-weight:600}\r\n";
+  m += ".sw.on{background:#4CAF50}\r\n";
+  m += ".seg{display:inline-flex;border-radius:6px;overflow:hidden;border:1px solid #ccc}\r\n";
+  m += ".seg a{padding:5px 10px;background:#f2f2f2;color:#333 !important;font-size:13px}\r\n";
+  m += ".seg a.act{background:#4CAF50;color:#fff !important;font-weight:600}\r\n";
+  m += ".warn{color:#c00}\r\n";
+  m += ".note{color:#777;font-size:13px;margin-top:2px;flex-basis:100%}\r\n";
+  m += "</style>\r\n";
+  m += "<title>M5 Nightscout - "; m += cfg.userName; m += "</title>\r\n";
+  m += "</head>\r\n<body>\r\n";
+  m += "<h1>M5Stack Nightscout monitor for "; m += cfg.userName; m += "!</h1>\r\n";
+}
+
+static void detailsOpen(String& m, const char* id, const char* label, const String& sec) {
+  m += "<details"; if (sec.equals(id)) m += " open"; m += "><summary>"; m += label; m += "</summary>\r\n";
+}
+
+static void rowText(String& m, const char* label, const String& value) {
+  m += "<div class=\"row\"><span>"; m += label; m += "</span><span><b>"; m += value; m += "</b></span></div>\r\n";
+}
+
+static void rowEdit(String& m, const char* label, const String& value, const char* editParam, const char* sec, const char* cls = NULL) {
+  m += "<div class=\"row\"><span>"; m += label; m += "</span><span>";
+  m += "<b"; if (cls) { m += " class=\""; m += cls; m += "\""; } m += ">";
+  m += value; m += "</b> <a href=\"edititem?param="; m += editParam; m += "&s="; m += sec; m += "\">edit</a></span></div>\r\n";
+}
+
+static void rowToggle(String& m, const char* label, bool value, const char* param, const char* sec, const char* onLabel = "YES", const char* offLabel = "NO") {
+  m += "<div class=\"row\"><span>"; m += label; m += "</span><span><a class=\"sw";
+  if (value) m += " on";
+  m += "\" href=\"switch?param="; m += param; m += "&s="; m += sec; m += "\">";
+  m += (value ? onLabel : offLabel); m += "</a></span></div>\r\n";
+}
+
+// Two-value choice rendered as two side-by-side buttons (the active one highlighted) instead
+// of a single value+link - both options are visible so there's nothing to "cycle" through.
+static void rowSeg(String& m, const char* label, bool isOn, const char* param, const char* sec, const char* onLabel, const char* offLabel) {
+  m += "<div class=\"row\"><span>"; m += label; m += "</span><span class=\"seg\">";
+  m += "<a"; if (isOn) m += " class=\"act\""; m += " href=\"switch?param="; m += param; m += "&v=1&s="; m += sec; m += "\">"; m += onLabel; m += "</a>";
+  m += "<a"; if (!isOn) m += " class=\"act\""; m += " href=\"switch?param="; m += param; m += "&v=0&s="; m += sec; m += "\">"; m += offLabel; m += "</a>";
+  m += "</span></div>\r\n";
+}
+
+static void rowSelect(String& m, const char* label, const char* param, const char* sec, const char* const opts[], const int vals[], int n, int current) {
+  m += "<div class=\"row\"><span>"; m += label; m += "</span><span><select onchange=\"location='switch?param=";
+  m += param; m += "&v='+this.value+'&s="; m += sec; m += "'\">\r\n";
+  for (int i = 0; i < n; i++) {
+    m += "<option value=\""; m += vals[i]; m += "\"";
+    if (vals[i] == current) m += " selected";
+    m += ">"; m += opts[i]; m += "</option>";
+  }
+  m += "</select></span></div>\r\n";
+}
+
+// Row for the /edititem forms: label + input on one line, optional note text wrapping to
+// its own line below (via .note{flex-basis:100%}), optional color class on the label.
+static void editRow(String& m, const char* label, const String& inputHtml, const char* note = NULL, const char* cls = NULL) {
+  m += "<div class=\"row\"><span"; if (cls) { m += " class=\""; m += cls; m += "\""; } m += ">";
+  m += label; m += "</span><span>"; m += inputHtml; m += "</span>";
+  if (note) { m += "<span class=\"note\">"; m += note; m += "</span>"; }
+  m += "</div>\r\n";
+}
+
 void handleRoot() {
-  String webVer;
-  String whatsNew;
-  HTTPClient http;
-  WiFiClientSecure updateClient;
-  updateClient.setInsecure();
   IPAddress ip = WiFi.localIP();
   char tmpStr[64];
   char timeStr[20];
@@ -49,38 +135,9 @@ void handleRoot() {
 
   Serial.println("Serving root web page");
 
-  if((WiFi.status() == WL_CONNECTED)) {
-    http.begin(updateClient, updateURL("update.inf"));
-    http.setTimeout(5000);
-    http.setConnectTimeout(5000);
-    int httpCode = http.GET();
-    if(httpCode > 0) {
-      if(httpCode == HTTP_CODE_OK) {
-        webVer = http.getString();
-      } else {
-        Serial.println("Error getting update.inf +");
-      }
-    } else {
-      Serial.println("Error getting update.inf");
-    }
-    http.end();
-    http.begin(updateClient, updateURL("whatsnew.txt"));
-    http.setTimeout(5000);
-    http.setConnectTimeout(5000);
-    httpCode = http.GET();
-    if(httpCode > 0) {
-      if(httpCode == HTTP_CODE_OK) {
-        whatsNew = http.getString();
-      } else {
-        Serial.println("Error getting whatsnew.txt +");
-      }
-    } else {
-      Serial.println("Error getting whatsnew.txt");
-    }
-    http.end();
-    whatsNew.replace("\r\n","<br />\r\n");
-  }
-  // Serial.println(webVer.length());
+  // Which section (if any) to render open - the one just touched by a switch/edit, so a
+  // change doesn't collapse the page back to Status-only. Defaults to Status.
+  String sec = w3srv.hasArg("s") ? w3srv.arg("s") : String("st");
 
   char NSurl[128];
   if(strncmp(cfg.url, "http", 4))
@@ -99,53 +156,40 @@ void handleRoot() {
   String sgvUnits = cfg.show_mgdl?"mg/dL":"mmol/L";
   int decpl = cfg.show_mgdl?0:1;
   int mult = cfg.show_mgdl?18:1;
-  
-  String message = "<!DOCTYPE HTML>\r\n";
-  message += "<html>\r\n";
-  message += "<head>\r\n";
-  message += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\r\n";
-  message += "<style>\r\n";
-  message += "html { font-family: Segoe UI; font-size: 15px; font-weight: 100; display: inline-block; margin: 5px auto; text-align: left;}\r\n";
-  message += ".button { background-color: #4CAF50; border: none; color: white; padding: 16px 40px;\r\n";
-  message += "text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}\r\n";
-  message += ".button2 {background-color: #555555;}\r\n";
-  message += "</style>\r\n";  
-  message += "<title>M5 Nightscout - "; message += cfg.userName;  message += "</title>\r\n";
-  message += "</head>\r\n";
-  message += "<body>\r\n";
-  message += "<h1>M5Stack Nightscout monitor for "; message += cfg.userName; message += "!</h1>\r\n";
 
-  message += "<p><b>M5Stack Nightscout monitor status</b><br />\r\n";
+  String message;
+  message.reserve(10240);
+  pageHeadOpen(message, NULL);
+
+  message += "<a class=\"btn\" href=\"/savecfg\">Save configuration to M5NS.INI</a>\r\n";
+  if (restartPending) {
+    message += "<p class=\"warn\">Changes pending that need a restart - the device will restart automatically when you save.</p>\r\n";
+  }
+
+  // ---- Status ----
+  detailsOpen(message, "st", "Status", sec);
   if ( WiFi.status() == WL_CONNECTED) {
-    message += "WiFi connected to SSID: <b>"; message += WiFi.SSID(); message += "</b><br />\r\n";
+    rowText(message, "WiFi SSID", WiFi.SSID());
     if(mDNSactive) {
-      message += "mDNS name: <b>";
       sprintf(tmpStr, "%s.local", cfg.deviceName);
-      message += tmpStr; message += "</b><br />\r\n";
+      rowText(message, "mDNS name", tmpStr);
     }
-    message += "IP address: <b>";
     sprintf(tmpStr, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
-    message += tmpStr; message += "</b><br />\r\n";
+    rowText(message, "IP address", tmpStr);
     byte mac[6];
     WiFi.macAddress(mac);
-    message += "MAC address: <b>";
-    message += String(mac[5],HEX) + ":";
-    message += String(mac[4],HEX) + ":";
-    message += String(mac[3],HEX) + ":";
-    message += String(mac[2],HEX) + ":";
-    message += String(mac[1],HEX) + ":";
-    message += String(mac[0],HEX) + "</b><br />\r\n";
+    String macStr = String(mac[5],HEX) + ":" + String(mac[4],HEX) + ":" + String(mac[3],HEX) + ":" + String(mac[2],HEX) + ":" + String(mac[1],HEX) + ":" + String(mac[0],HEX);
+    rowText(message, "MAC address", macStr);
   }
-  message += "Battery status: <b>"; message += getBatteryLevel(); message += "%</b><br />\r\n";
+  sprintf(tmpStr, "%d%%", getBatteryLevel());
+  rowText(message, "Battery status", tmpStr);
   struct tm timeinfo;
   if(getLocalTime(&timeinfo)) {
     switch(cfg.time_format) {
       case 1:
-        // sprintf(tmpStr, "%d/%d/%d %02d:%02d:%02d", timeinfo.tm_mon+1, timeinfo.tm_mday, timeinfo.tm_year+1900, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
         strftime(timeStr, 19, "%I:%M:%S %p ", &timeinfo);
         break;
       default:
-        // sprintf(tmpStr, "%d.%d.%d %02d:%02d:%02d", timeinfo.tm_mday, timeinfo.tm_mon+1, timeinfo.tm_year+1900, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
         strftime(timeStr, 19, "%H:%M:%S ", &timeinfo);
     }
     switch(cfg.date_format) {
@@ -160,14 +204,12 @@ void handleRoot() {
   } else {
     strcpy(tmpStr, "??:??");
   }
-  message += "Current time: <b>"; message += tmpStr; message += "</b><br />\r\n";
+  rowText(message, "Current time", tmpStr);
   switch(cfg.time_format) {
     case 1:
-      // sprintf(tmpStr, "%d/%d/%d %02d:%02d:%02d", ns.sensTm.tm_mon+1, ns.sensTm.tm_mday, ns.sensTm.tm_year+1900, ns.sensTm.tm_hour, ns.sensTm.tm_min, ns.sensTm.tm_sec);
       strftime(timeStr, 15, "%I:%M:%S %p ", &ns.sensTm);
       break;
     default:
-      // sprintf(tmpStr, "%d.%d.%d %02d:%02d:%02d", ns.sensTm.tm_mday, ns.sensTm.tm_mon+1, ns.sensTm.tm_year+1900, ns.sensTm.tm_hour, ns.sensTm.tm_min, ns.sensTm.tm_sec);
       strftime(timeStr, 15, "%H:%M:%S ", &ns.sensTm);
   }
   switch(cfg.date_format) {
@@ -179,166 +221,209 @@ void handleRoot() {
   }
   strcpy(tmpStr, dateStr);
   strcat(tmpStr, timeStr);
-  message += "Sensor time: <b>"; message += tmpStr; message += "</b><br />\r\n";
+  rowText(message, "Sensor time", tmpStr);
   if( cfg.show_mgdl ) {
     sprintf(tmpStr, "%3.0f mg/dL", ns.sensSgvMgDl);
   } else {
     sprintf(tmpStr, "%4.1f mmol/L", ns.sensSgv);
   }
-  message += "Last sensor value: <b>"; message += tmpStr; message += "</b><br />\r\n";
-  message += "Last sensor direction: <b>"; message += ns.sensDir; message += "</b><br />\r\n";
-/* can possibly display all this, but why?
-  struct tm sensTm;
-  char sensDir[32];
-  float sensSgvMgDl = 0;
-  float sensSgv = 0;
-  float last10sgv[10];
-  bool is_xDrip = 0;
-  char iob_displayLine[16];
-  char cob_displayLine[16];
-  char delta_display[16];
-  char loop_display_symbol = '?';
-  char loop_display_code[16];
-  char loop_display_label[16];
-  char basal_display[16];
-  */
-  message += "</p>\r\n";
+  rowText(message, "Last sensor value", tmpStr);
+  rowText(message, "Last sensor direction", ns.sensDir);
+  message += "</details>\r\n";
 
-  message += "<p><b>Current configuration</b><br />\r\n";
-  message += "Nightscout URL: "; message += "<a href=\""; message += NSurl; message += "\"><b>"; message += NSurl; message += "</b></a> <a href=\"edititem?param=NSurl\">[edit]</a><br />\r\n";
-  message += "User name: <b>"; message += cfg.userName; message += "</b> <a href=\"edititem?param=userName\">[edit]</a><br />\r\n";
-  message += "Device name: <b>"; message += cfg.deviceName; message += "</b> <a href=\"edititem?param=deviceName\">[edit]</a><br />\r\n";
-  message += "Time offset: <b>"; message += cfg.timeZone; message += " seconds</b> <a href=\"edititem?param=timeZoneDST\">[edit]</a><br />\r\n";
-  message += "Daylight saving time offset: <b>"; message += cfg.dst; message += " seconds</b> <a href=\"edititem?param=timeZoneDST\">[edit]</a><br />\r\n";
-  message += "Display units: <b>"; message += cfg.show_mgdl?"mg/dL":"mmol/L"; message += "</b> <a href=\"switch?param=show_mgdl\">[change]</a><br />\r\n";
-  message += "Filter only SGV values: <b>"; message += cfg.sgv_only?"YES":"NO"; message += "</b> <a href=\"switch?param=sgv_only\">[change]</a><br />\r\n";
-  message += "Default page: <b>"; message += cfg.default_page; message += "</b> <a href=\"switch?param=default_page\">[change]</a><br />\r\n";
-  message += "Restart at time: <b>"; message += strcmp(cfg.restart_at_time,"NORES")==0?"do NOT restart":cfg.restart_at_time; message += "</b> <a href=\"edititem?param=restartAt\">[edit]</a><br />\r\n";
-  message += "Restart at logged number of errors: <b>"; message += cfg.restart_at_logged_errors==0?"do NOT restart":String(cfg.restart_at_logged_errors); message += "</b> <a href=\"edititem?param=restartAt\">[edit]</a><br />\r\n";
-  message += "Show time: <b>"; message += cfg.show_current_time?"current time":"last valid data"; message += "</b> <a href=\"switch?param=show_current_time\">[change]</a><br />\r\n";
-  message += "Show COB+IOB: <b>"; message += cfg.show_COB_IOB?"YES":"NO"; message += "</b> <a href=\"switch?param=show_COB_IOB\">[change]</a><br />\r\n";
-  message += "Snooze timeout: <b>"; message += cfg.snooze_timeout; message += " minutes</b> <a href=\"edititem?param=alarmTiming\">[edit]</a><br />\r\n";
-  message += "Repeat alarm/warning every <b>"; message += cfg.alarm_repeat; message += " minutes</b> <a href=\"edititem?param=alarmTiming\">[edit]</a><br />\r\n";
-  message += "<font color=\"#BB9900\">Display yellow below <b>"; message += String(cfg.yellow_low*mult, decpl); message += " "+sgvUnits; message += "</b></font> <a href=\"edititem?param=dispColors\">[edit]</a><br />\r\n";
-  message += "<font color=\"#BB9900\">Display yellow above <b>"; message += String(cfg.yellow_high*mult, decpl); message += " "+sgvUnits; message += "</b></font> <a href=\"edititem?param=dispColors\">[edit]</a><br />\r\n";
-  message += "<font color=\"Red\">Display red below <b>"; message += String(cfg.red_low*mult, decpl); message += " "+sgvUnits; message += "</b></font> <a href=\"edititem?param=dispColors\">[edit]</a><br />\r\n";
-  message += "<font color=\"Red\">Display red above <b>"; message += String(cfg.red_high*mult, decpl); message += " "+sgvUnits; message += "</b></font> <a href=\"edititem?param=dispColors\">[edit]</a><br />\r\n";
-  message += "<font color=\"Teal\">Warning sound below <b>"; message += String(cfg.snd_warning*mult, decpl); message += " "+sgvUnits; message += "</b></font> <a href=\"edititem?param=sndAlarms\">[edit]</a><br />\r\n";
-  message += "<font color=\"Teal\">Warning sound above <b>"; message += String(cfg.snd_warning_high*mult, decpl); message += " "+sgvUnits; message += "</b></font> <a href=\"edititem?param=sndAlarms\">[edit]</a><br />\r\n";
-  message += "<font color=\"Teal\">Alarm sound below <b>"; message += String(cfg.snd_alarm*mult, decpl); message += " "+sgvUnits; message += "</b></font> <a href=\"edititem?param=sndAlarms\">[edit]</a><br />\r\n";
-  message += "<font color=\"Teal\">Alarm sound above <b>"; message += String(cfg.snd_alarm_high*mult, decpl); message += " "+sgvUnits; message += "</b></font> <a href=\"edititem?param=sndAlarms\">[edit]</a><br />\r\n";
-  message += "<font color=\"Teal\">Warning sound when no reading for <b>"; message += cfg.snd_no_readings; message += " minutes</b></font> <a href=\"edititem?param=sndAlarms\">[edit]</a><br />\r\n";
-  message += "<font color=\"Teal\">Alarm sound on LOOP Error: <b>"; message += cfg.snd_loop_error?"YES":"NO"; message += "</b></font> <a href=\"switch?param=snd_loop_error\">[change]</a><br />\r\n";
-  message += "<font color=\"Teal\">Play test warning sound during startup: <b>"; message += cfg.snd_warning_at_startup?"YES":"NO"; message += "</b></font> <a href=\"switch?param=snd_warning_at_startup\">[change]</a><br />\r\n";
-  message += "<font color=\"Teal\">Play test alarm sound during startup: <b>"; message += cfg.snd_alarm_at_startup?"YES":"NO"; message += "</b></font> <a href=\"switch?param=snd_alarm_at_startup\">[change]</a><br />\r\n";
-  message += "<font color=\"Teal\">Warning sound volume: <b>"; message += cfg.warning_volume; message += "%</b></font> <a href=\"edititem?param=sndAlarms\">[edit]</a><br />\r\n";
-  message += "<font color=\"Teal\">Alarm sound volume: <b>"; message += cfg.alarm_volume; message += "%</b></font> <a href=\"edititem?param=sndAlarms\">[edit]</a><br />\r\n";
-  message += "Status line: <b>";
-  switch(cfg.info_line) {
-    case 0: message += "sensor info"; break;
-    case 1: message += "button function icons"; break;
-    case 2: message += "loop info + basal"; break;
-    case 3: message += "openaps info + basal"; break;
+  // ---- Nightscout ----
+  detailsOpen(message, "ns", "Nightscout", sec);
+  rowEdit(message, "Nightscout URL", "<a href=\"" + String(NSurl) + "\">" + String(NSurl) + "</a>", "NSurl", "ns");
+  rowEdit(message, "User name", cfg.userName, "userName", "ns");
+  rowSeg(message, "Display units", cfg.show_mgdl, "show_mgdl", "ns", "mg/dL", "mmol/L");
+  rowToggle(message, "Filter only SGV values", cfg.sgv_only, "sgv_only", "ns");
+  message += "</details>\r\n";
+
+  // ---- Display ----
+  detailsOpen(message, "di", "Display", sec);
+  {
+    char pageLabels[8][4];
+    const char* pageOpts[8]; int pageVals[8];
+    int n = 0;
+    for (int p = 0; p <= maxPage && p < 8; p++) {
+      snprintf(pageLabels[p], sizeof(pageLabels[p]), "%d", p);
+      pageOpts[p] = pageLabels[p];
+      pageVals[p] = p;
+      n++;
+    }
+    rowSelect(message, "Default page", "default_page", "di", pageOpts, pageVals, n, cfg.default_page);
   }
-  message += "</b> <a href=\"switch?param=info_line\">[change]</a><br />\r\n";
-  message += "Brightness settings steps: <b>";  message += cfg.brightness1; message += ", "; message += cfg.brightness2; message += ", "; message += cfg.brightness3; message += "</b> <a href=\"edititem?param=brightness\">[edit]</a><br />\r\n";
-  message += "Time format: <b>"; message += cfg.time_format?"AM/PM":"24 Hours"; message += "</b> <a href=\"switch?param=time_format\">[change]</a><br />\r\n";
-  message += "Date format: <b>"; message += cfg.date_format?"MM/DD":"dd.mm."; message += "</b> <a href=\"switch?param=date_format\">[change]</a><br />\r\n";
-  message += "Display rotation: <b>";
-  switch(cfg.display_rotation) {
-    case 1: message += "buttons down"; break;
-    case 3: message += "buttons up"; break;
-    case 5: message += "mirror buttons up"; break;
-    case 7: message += "mirror buttons down"; break;
+  rowSeg(message, "Show time", cfg.show_current_time, "show_current_time", "di", "current time", "last data");
+  rowToggle(message, "Show COB+IOB", cfg.show_COB_IOB, "show_COB_IOB", "di");
+  rowSeg(message, "Time format", cfg.time_format, "time_format", "di", "AM/PM", "24h");
+  rowSeg(message, "Date format", cfg.date_format, "date_format", "di", "MM/DD", "dd.mm.");
+  {
+    const char* rotOpts[4] = {"buttons down","buttons up","mirror buttons up","mirror buttons down"};
+    const int rotVals[4] = {1,3,5,7};
+    rowSelect(message, "Display rotation", "display_rotation", "di", rotOpts, rotVals, 4, cfg.display_rotation);
   }
-  message += "</b> <a href=\"switch?param=display_rotation\">[change]</a><br />\r\n";
-  message += "Display inversion: <b>";
-  switch(cfg.invert_display) {
-    case -1: message += "do not change"; break;
-    case 0: message += "false"; break;
-    case 1: message += "true"; break;
+  {
+    const char* invOpts[3] = {"do not change","false","true"};
+    const int invVals[3] = {-1,0,1};
+    rowSelect(message, "Display inversion", "invert_display", "di", invOpts, invVals, 3, cfg.invert_display);
   }
-  message += "</b> <a href=\"switch?param=invert_display\">[change]</a><br />\r\n";
-  message += "Temperature units: <b>";
-  switch(cfg.temperature_unit) {
-    case 1: message += "Celsius"; break;
-    case 2: message += "Kelvin"; break;
-    case 3: message += "Fahrenheit"; break;
+  rowEdit(message, "Brightness steps", String(cfg.brightness1) + ", " + String(cfg.brightness2) + ", " + String(cfg.brightness3), "brightness", "di");
+  {
+    const char* lineOpts[4] = {"sensor info","button function icons","loop info + basal","openaps info + basal"};
+    const int lineVals[4] = {0,1,2,3};
+    rowSelect(message, "Status line", "info_line", "di", lineOpts, lineVals, 4, cfg.info_line);
   }
-  message += "</b> <a href=\"switch?param=temperature_unit\">[change]</a><br />\r\n";
-  message += "LED strip mode: <b>";
-  switch(cfg.LED_strip_mode) {
-    case 0: message += "OFF"; break;
-    case 1: message += "visualize sound"; break;
-    case 2: message += "show warnings and alarms"; break;
-    case 3: message += "light always"; break;
+  {
+    const char* tempOpts[3] = {"Celsius","Kelvin","Fahrenheit"};
+    const int tempVals[3] = {1,2,3};
+    rowSelect(message, "Temperature units", "temperature_unit", "di", tempOpts, tempVals, 3, cfg.temperature_unit);
   }
-  message += "</b> <a href=\"switch?param=LED_strip_mode\">[change]</a><br />\r\n";
-  message += "LED strip pin: <b>"; message += cfg.LED_strip_pin; message += "</b> <a href=\"edititem?param=led_strip\">[edit]</a><br />\r\n";
-  message += "LED strip count: <b>"; message += cfg.LED_strip_count; message += "</b> <a href=\"edititem?param=led_strip\">[edit]</a><br />\r\n";
-  message += "LED strip brightness: <b>"; message += cfg.LED_strip_brightness; message += "%</b> <a href=\"edititem?param=led_strip\">[edit]</a><br />\r\n";
-  message += "Vibration motor unit: <b>"; message += cfg.vibration_mode?"YES":"NO"; message += "</b> <a href=\"switch?param=vibration_mode\">[change]</a><br />\r\n";
-  message += "Vibration motor pin: <b>"; message += cfg.vibration_pin; message += "</b> <a href=\"edititem?param=vibration_motor\">[edit]</a><br />\r\n";
-  message += "Vibration motor strength: <b>"; message += cfg.vibration_strength; message += "</b> <a href=\"edititem?param=vibration_motor\">[edit]</a><br />\r\n";
-  message += "Micro Dot pHAT on I2C port: <b>"; message += cfg.micro_dot_pHAT?"YES":"NO"; message += "</b> <a href=\"switch?param=micro_dot_pHAT\">[change]</a><br />\r\n";
-  message += "Developer mode: <b>"; message += cfg.dev_mode?"Enabled":"Disabled"; message += "</b> <a href=\"switch?param=dev_mode\">[change]</a><br />\r\n";
-  message += "Internal Web Server: <b>"; message += cfg.disable_web_server?"Disabled":"Enabled"; message += "</b> <a href=\"switch?param=disable_web_server\">[change]</a><br />\r\n";
-  
+  message += "</details>\r\n";
+
+  // ---- Colors & thresholds ----
+  detailsOpen(message, "th", "Colors & thresholds", sec);
+  rowEdit(message, "Yellow below", String(cfg.yellow_low*mult, decpl) + " " + sgvUnits, "dispColors", "th", "y");
+  rowEdit(message, "Yellow above", String(cfg.yellow_high*mult, decpl) + " " + sgvUnits, "dispColors", "th", "y");
+  rowEdit(message, "Red below", String(cfg.red_low*mult, decpl) + " " + sgvUnits, "dispColors", "th", "r");
+  rowEdit(message, "Red above", String(cfg.red_high*mult, decpl) + " " + sgvUnits, "dispColors", "th", "r");
+  message += "</details>\r\n";
+
+  // ---- Alarms & sounds ----
+  detailsOpen(message, "al", "Alarms & sounds", sec);
+  rowEdit(message, "Snooze timeout", String(cfg.snooze_timeout) + " min", "alarmTiming", "al");
+  rowEdit(message, "Repeat alarm every", String(cfg.alarm_repeat) + " min", "alarmTiming", "al");
+  rowEdit(message, "Warning sound below", String(cfg.snd_warning*mult, decpl) + " " + sgvUnits, "sndAlarms", "al", "t");
+  rowEdit(message, "Warning sound above", String(cfg.snd_warning_high*mult, decpl) + " " + sgvUnits, "sndAlarms", "al", "t");
+  rowEdit(message, "Alarm sound below", String(cfg.snd_alarm*mult, decpl) + " " + sgvUnits, "sndAlarms", "al", "t");
+  rowEdit(message, "Alarm sound above", String(cfg.snd_alarm_high*mult, decpl) + " " + sgvUnits, "sndAlarms", "al", "t");
+  rowEdit(message, "No-readings warning", String(cfg.snd_no_readings) + " min", "sndAlarms", "al", "t");
+  rowToggle(message, "Alarm on LOOP Error", cfg.snd_loop_error, "snd_loop_error", "al");
+  rowToggle(message, "Test warning at startup", cfg.snd_warning_at_startup, "snd_warning_at_startup", "al");
+  rowToggle(message, "Test alarm at startup", cfg.snd_alarm_at_startup, "snd_alarm_at_startup", "al");
+  rowEdit(message, "Warning sound volume", String(cfg.warning_volume) + "%", "sndAlarms", "al", "t");
+  rowEdit(message, "Alarm sound volume", String(cfg.alarm_volume) + "%", "sndAlarms", "al", "t");
+  message += "</details>\r\n";
+
+  // ---- WiFi & network ----
+  detailsOpen(message, "wf", "WiFi & network", sec);
+  rowEdit(message, "Device name", cfg.deviceName, "deviceName", "wf");
+  rowSeg(message, "Internal Web Server", !cfg.disable_web_server, "disable_web_server", "wf", "Enabled", "Disabled");
   int wlans_defined_count = 0;
   for(int i=0; i<10; i++) {
     if(cfg.wlanssid[i][0] != 0) {
       wlans_defined_count++;
-      message += "[wlan"; message += i; message += "] <b>";
-      message += "SSID='";
-      message += cfg.wlanssid[i];
+      String val = "SSID='" + String(cfg.wlanssid[i]) + "'";
       if(cfg.wlanpass[i][0]!=0) {
-        message += "', PASS='";
-        for(int j=0; j<strlen(cfg.wlanpass[i]); j++)
-          message += "*";
-        message += "'</b> <a href=\"edititem?param=wlans\">[edit]</a><br />\r\n";
+        String stars;
+        for(int j=0; j<(int)strlen(cfg.wlanpass[i]); j++)
+          stars += "*";
+        val += ", PASS='" + stars + "'";
       } else {
-        message += "', no password (open)</b> <a href=\"edititem?param=wlans\">[edit]</a><br />\r\n";
+        val += ", no password (open)";
       }
+      char lbl[10]; snprintf(lbl, sizeof(lbl), "wlan%d", i);
+      rowEdit(message, lbl, val, "wlans", "wf");
     }
   }
   if (wlans_defined_count < 1) {
-    message += "WiFi Configuration <b>(none)</b> <a href=\"edititem?param=wlans\">[edit]</a><br />\r\n";
+    rowEdit(message, "WiFi Configuration", "(none)", "wlans", "wf");
   }
-/*
-  char warning_music[64];
-  char alarm_music[64];
+  message += "</details>\r\n";
 
-  if (output26State=="off") {
-    client.println("<p><a href=\"/26/on\"><button class=\"button\">ON</button></a></p>");
-  } else {
-    client.println("<p><a href=\"/26/off\"><button class=\"button button2\">OFF</button></a></p>");
+  // ---- Hardware add-ons ----
+  detailsOpen(message, "hw", "Hardware add-ons", sec);
+  {
+    const char* ledOpts[4] = {"OFF","visualize sound","show warnings and alarms","light always"};
+    const int ledVals[4] = {0,1,2,3};
+    rowSelect(message, "LED strip mode", "LED_strip_mode", "hw", ledOpts, ledVals, 4, cfg.LED_strip_mode);
   }
-*/  
-  
-  message += "<a href=\"/savecfg\"><strong>Save configuration to M5NS.INI file.</strong></a></p>\r\n";
+  rowEdit(message, "LED strip pin", String(cfg.LED_strip_pin), "led_strip", "hw");
+  rowEdit(message, "LED strip count", String(cfg.LED_strip_count), "led_strip", "hw");
+  rowEdit(message, "LED strip brightness", String(cfg.LED_strip_brightness) + "%", "led_strip", "hw");
+  rowToggle(message, "Vibration motor unit", cfg.vibration_mode, "vibration_mode", "hw");
+  rowEdit(message, "Vibration motor pin", String(cfg.vibration_pin), "vibration_motor", "hw");
+  rowEdit(message, "Vibration motor strength", String(cfg.vibration_strength), "vibration_motor", "hw");
+  rowToggle(message, "Micro Dot pHAT", cfg.micro_dot_pHAT, "micro_dot_pHAT", "hw");
+  message += "</details>\r\n";
 
-  // firmware info and update
-  message += "<p><b>Application firmware</b><br />\r\n";
-  message += "Current version: "; message += M5NSversion; message += "<br />\r\n";
-  message += "Latest version: "; message += webVer; 
-  if(webVer > M5NSversion) {
-    message += " ";
-    message += "<a href=\"/update\"><b>click to update</b></a>";
-  }
-  message += "<br />\r\n";
-  if(whatsNew.length()>0) {
-    message += "<b>Last update information:</b><br />\r\n";
-    message += whatsNew;
-    message += "\r\n";
-  }
-  
-  message += "</body>\r\n";
-  message += "</html>\r\n";
+  // ---- System & firmware ----
+  detailsOpen(message, "sy", "System & firmware", sec);
+  rowEdit(message, "Time offset", String(cfg.timeZone) + " s", "timeZoneDST", "sy");
+  rowEdit(message, "DST offset", String(cfg.dst) + " s", "timeZoneDST", "sy");
+  rowEdit(message, "Restart at time", strcmp(cfg.restart_at_time,"NORES")==0?String("do NOT restart"):String(cfg.restart_at_time), "restartAt", "sy");
+  rowEdit(message, "Restart after N errors", cfg.restart_at_logged_errors==0?String("do NOT restart"):String(cfg.restart_at_logged_errors), "restartAt", "sy");
+  rowToggle(message, "Developer mode", cfg.dev_mode, "dev_mode", "sy", "Enabled", "Disabled");
+  rowText(message, "Current firmware version", M5NSversion);
+  message += "<div class=\"row\"><span></span><span><a href=\"/fwcheck\">Check for update</a></span></div>\r\n";
+  message += "</details>\r\n";
+
+  message += "</body>\r\n</html>\r\n";
   w3srv.send(200, "text/html", message);
 
-  if(cfg.LED_strip_mode != 0) { 
+  if(cfg.LED_strip_mode != 0) {
     pixels.show();
   }
+}
+
+// Firmware version/whatsnew check, split out of handleRoot() so the root page never
+// blocks on a GitHub fetch (up to 2x5s timeout) - loads instantly, checked on demand.
+void handleFwCheck() {
+  String webVer;
+  String whatsNew;
+  bool fetchOk = false;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    WiFiClientSecure updateClient;
+    updateClient.setInsecure();
+
+    http.begin(updateClient, updateURL("update.inf"));
+    http.setTimeout(5000);
+    http.setConnectTimeout(5000);
+    int httpCode = http.GET();
+    if (httpCode == HTTP_CODE_OK) {
+      webVer = http.getString();
+      fetchOk = true;
+    } else {
+      Serial.println("Error getting update.inf");
+    }
+    http.end();
+
+    if (fetchOk) {
+      http.begin(updateClient, updateURL("whatsnew.txt"));
+      http.setTimeout(5000);
+      http.setConnectTimeout(5000);
+      httpCode = http.GET();
+      if (httpCode == HTTP_CODE_OK) {
+        whatsNew = http.getString();
+        whatsNew.replace("\r\n", "<br />\r\n");
+      }
+      http.end();
+    }
+  }
+
+  String message;
+  message.reserve(1536);
+  pageHeadOpen(message, NULL);
+  message += "<p><b>Application firmware</b><br />\r\n";
+  message += "Current version: "; message += M5NSversion; message += "<br />\r\n";
+  if (!fetchOk) {
+    message += "Could not reach the update server. Check the WiFi connection and try again.<br />\r\n";
+  } else {
+    message += "Latest version: "; message += webVer;
+    if (webVer > M5NSversion) {
+      message += " <a href=\"/update\"><b>click to update</b></a>";
+    }
+    message += "<br />\r\n";
+    if (whatsNew.length() > 0) {
+      message += "<b>Last update information:</b><br />\r\n";
+      message += whatsNew;
+      message += "\r\n";
+    }
+  }
+  message += "</p>\r\n<p><a href=\"/\">Back to configuration</a></p>\r\n";
+  message += "</body>\r\n</html>\r\n";
+  w3srv.send(200, "text/html", message);
 }
 
 void handleUpdate() {
@@ -356,18 +441,9 @@ void handleUpdate() {
   M5.Lcd.print("Free Heap: "); M5.Lcd.println(ESP.getFreeHeap());
   M5.Lcd.println();
 
-  String message = "<!DOCTYPE HTML>\r\n";
-  message += "<html>\r\n";
-  message += "<head>\r\n"; 
-  message += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\r\n";
-  message += "<meta http-equiv=\"refresh\" content=\"30;url=/\" />\r\n";
-  message += "<style>\r\n";  
-  message += "html { font-family: Segoe UI; display: inline-block; margin: 5px auto; text-align: left;}\r\n";
-  message += "</style>\r\n";  
-  message += "<title>M5 Nightscout - "; message += cfg.userName;  message += "</title>\r\n";
-  message += "</head>\r\n";
-  message += "<body>\r\n";
-  message += "<h1>M5Stack Nightscout monitor for "; message += cfg.userName; message += "!</h1>\r\n";
+  String message;
+  message.reserve(1024);
+  pageHeadOpen(message, "<meta http-equiv=\"refresh\" content=\"30;url=/\" />\r\n");
 
   String webVer;
   HTTPClient http;
@@ -451,117 +527,163 @@ void handleUpdate() {
 }
 
 void handleSwitchConfig() {
-  String message = "<!DOCTYPE HTML>\r\n";
-  message += "<html>\r\n";
-  message += "<head>\r\n"; 
-  message += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\r\n";
-  // redirect to root after 1 second
-  message += "<meta http-equiv=\"refresh\" content=\"1;url=/\" />\r\n";
-  message += "<style>\r\n";  
-  message += "html { font-family: Segoe UI; display: inline-block; margin: 5px auto; text-align: left;}\r\n";
-  message += "</style>\r\n";  
-  message += "<title>M5 Nightscout - "; message += cfg.userName;  message += "</title>\r\n";
-  message += "</head>\r\n";
-  message += "<body>\r\n";
-  message += "<h1>M5Stack Nightscout monitor for "; message += cfg.userName; message += "!</h1>\r\n";
-  message += "<p>Switching configuration value.</p>\r\n";
-  /*
-  message += "\nArguments: ";
-  message += w3srv.args();
-  message += "\n";
-  for (uint8_t i = 0; i < w3srv.args(); i++) {
-    message += " " + w3srv.argName(i) + ": " + w3srv.arg(i) + "\n";
+  // Multi-value settings accept an explicit "v" (from the root page's <select> dropdowns
+  // and [Seg] two-way buttons) and set that value directly; without "v" they fall back to
+  // the old cycle-to-next behavior, so existing bookmarked/typed switch links keep working.
+  // Yes/No settings always just toggle. "s" carries the section id back to handleRoot() so
+  // only the section just touched stays expanded.
+  bool haveVal = w3srv.hasArg("v");
+  long val = haveVal ? String(w3srv.arg("v")).toInt() : 0;
+  String sec = w3srv.hasArg("s") ? w3srv.arg("s") : String("st");
+
+  // Turning the internal web server off kills this page mid-session: loop() stops calling
+  // handleClient() as soon as the flag flips, so the redirect back to "/" never loads and the
+  // Save button becomes unreachable. That means the change can never actually be persisted from
+  // here (a restart restores it from M5NS.INI/flash) - but the page simply going dead looks like
+  // a crash, so say what will happen first. "ok=1" is the confirmed request coming back.
+  if (w3srv.hasArg("param") && String(w3srv.arg("param")).equals("disable_web_server")
+      && !w3srv.hasArg("ok")) {
+    bool wouldDisable = haveVal ? (val == 0) : (cfg.disable_web_server == 0);
+    if (wouldDisable) {
+      String message;
+      message.reserve(1536);
+      pageHeadOpen(message, NULL);
+      message += "<h2 class=\"warn\">Disable the internal web server?</h2>\r\n";
+      message += "<p>This page <b>is</b> the internal web server. It will stop responding "
+                 "immediately - this is expected, not a crash.</p>\r\n";
+      message += "<p>The change is <b>not saved</b>: you will not be able to reach the Save "
+                 "button, so simply <b>restart the device</b> and the web server comes back.</p>\r\n";
+      message += "<p>To turn it off permanently, set <code>disable_web_server = 1</code> in "
+                 "<code>M5NS.INI</code> on the SD card. You can still get back in by restarting "
+                 "while holding the left button (or tapping CONFIG on touch models) to enter "
+                 "setup mode, which always serves this page.</p>\r\n";
+      message += "<p><a class=\"btn2\" href=\"switch?param=disable_web_server&v=0&ok=1&s=";
+      message += sec; message += "\">Disable anyway</a>\r\n";
+      message += "<a class=\"btn\" href=\"/?s="; message += sec; message += "\">Keep it enabled</a></p>\r\n";
+      message += "</body>\r\n</html>\r\n";
+      w3srv.send(200, "text/html", message);
+      return;
+    }
   }
-  */
+
   for (uint8_t i = 0; i < w3srv.args(); i++) {
     if(String(w3srv.argName(i)).equals("param")) {
-      if(String(w3srv.arg(i)).equals("show_mgdl")) {
-        cfg.show_mgdl = !cfg.show_mgdl;
-        // Serial.print("show_mgdl = "); Serial.println(cfg.show_mgdl);
+      String param = w3srv.arg(i);
+      if(param.equals("show_mgdl")) {
+        if(haveVal) cfg.show_mgdl = (val!=0);
+        else cfg.show_mgdl = !cfg.show_mgdl;
       }
-      if(String(w3srv.arg(i)).equals("sgv_only")) {
+      else if(param.equals("sgv_only")) {
         cfg.sgv_only = !cfg.sgv_only;
       }
-      if(String(w3srv.arg(i)).equals("default_page")) {
-        cfg.default_page++;
-        if(cfg.default_page>maxPage)        
-          cfg.default_page = 0;
+      else if(param.equals("default_page")) {
+        if(haveVal && val>=0 && val<=maxPage)
+          cfg.default_page = val;
+        else {
+          cfg.default_page++;
+          if(cfg.default_page>maxPage)
+            cfg.default_page = 0;
+        }
         dispPage = cfg.default_page;
         setPageIconPos(dispPage);
       }
-      if(String(w3srv.arg(i)).equals("show_current_time")) {
-        cfg.show_current_time = !cfg.show_current_time;
+      else if(param.equals("show_current_time")) {
+        if(haveVal) cfg.show_current_time = (val!=0);
+        else cfg.show_current_time = !cfg.show_current_time;
       }
-      if(String(w3srv.arg(i)).equals("show_COB_IOB")) {
+      else if(param.equals("show_COB_IOB")) {
         cfg.show_COB_IOB = !cfg.show_COB_IOB;
       }
-      if(String(w3srv.arg(i)).equals("snd_loop_error")) {
+      else if(param.equals("snd_loop_error")) {
         cfg.snd_loop_error = !cfg.snd_loop_error;
       }
-      if(String(w3srv.arg(i)).equals("snd_warning_at_startup")) {
+      else if(param.equals("snd_warning_at_startup")) {
         cfg.snd_warning_at_startup = !cfg.snd_warning_at_startup;
       }
-      if(String(w3srv.arg(i)).equals("snd_alarm_at_startup")) {
+      else if(param.equals("snd_alarm_at_startup")) {
         cfg.snd_alarm_at_startup = !cfg.snd_alarm_at_startup;
       }
-      if(String(w3srv.arg(i)).equals("info_line")) {
-        cfg.info_line++;
-        if(cfg.info_line>3)
-          cfg.info_line = 0;
+      else if(param.equals("info_line")) {
+        if(haveVal && val>=0 && val<=3)
+          cfg.info_line = val;
+        else {
+          cfg.info_line++;
+          if(cfg.info_line>3)
+            cfg.info_line = 0;
+        }
       }
-      if(String(w3srv.arg(i)).equals("time_format")) {
-        cfg.time_format++;
-        if(cfg.time_format>1)
-          cfg.time_format = 0;
+      else if(param.equals("time_format")) {
+        if(haveVal && val>=0 && val<=1)
+          cfg.time_format = val;
+        else {
+          cfg.time_format++;
+          if(cfg.time_format>1)
+            cfg.time_format = 0;
+        }
       }
-      if(String(w3srv.arg(i)).equals("date_format")) {
-        cfg.date_format++;
-        if(cfg.date_format>1)
-          cfg.date_format = 0;
+      else if(param.equals("date_format")) {
+        if(haveVal && val>=0 && val<=1)
+          cfg.date_format = val;
+        else {
+          cfg.date_format++;
+          if(cfg.date_format>1)
+            cfg.date_format = 0;
+        }
       }
-      if(String(w3srv.arg(i)).equals("display_rotation")) {
-        if(cfg.display_rotation == 1) {
+      else if(param.equals("display_rotation")) {
+        if(haveVal && (val==1 || val==3 || val==5 || val==7)) {
+          cfg.display_rotation = val;
+        } else if(cfg.display_rotation == 1) {
           cfg.display_rotation = 3;
+        } else if(cfg.display_rotation == 3) {
+          cfg.display_rotation = 5;
+        } else if(cfg.display_rotation == 5) {
+          cfg.display_rotation = 7;
         } else {
-          if(cfg.display_rotation == 3) {
-            cfg.display_rotation = 5;
-          } else {
-            if(cfg.display_rotation == 5) {
-              cfg.display_rotation = 7;
-            } else {
-              cfg.display_rotation = 1;
-            }
-          }
+          cfg.display_rotation = 1;
         }
         M5.Lcd.setRotation(cfg.display_rotation);
       }
-      if(String(w3srv.arg(i)).equals("invert_display")) {
-        cfg.invert_display++;
-        if(cfg.invert_display>1)
-          cfg.invert_display = -1;
+      else if(param.equals("invert_display")) {
+        if(haveVal && val>=-1 && val<=1)
+          cfg.invert_display = val;
+        else {
+          cfg.invert_display++;
+          if(cfg.invert_display>1)
+            cfg.invert_display = -1;
+        }
         if(cfg.invert_display != -1)
           M5.Lcd.invertDisplay(cfg.invert_display);
       }
-      if(String(w3srv.arg(i)).equals("temperature_unit")) {
-        cfg.temperature_unit++;
-        if(cfg.temperature_unit>3)
-          cfg.temperature_unit = 1;
+      else if(param.equals("temperature_unit")) {
+        if(haveVal && val>=1 && val<=3)
+          cfg.temperature_unit = val;
+        else {
+          cfg.temperature_unit++;
+          if(cfg.temperature_unit>3)
+            cfg.temperature_unit = 1;
+        }
       }
-      if(String(w3srv.arg(i)).equals("LED_strip_mode")) {
-        cfg.LED_strip_mode++;
-        if(cfg.LED_strip_mode>3) {
-          cfg.LED_strip_mode = 0;
+      else if(param.equals("LED_strip_mode")) {
+        if(haveVal && val>=0 && val<=3)
+          cfg.LED_strip_mode = val;
+        else {
+          cfg.LED_strip_mode++;
+          if(cfg.LED_strip_mode>3)
+            cfg.LED_strip_mode = 0;
+        }
+        if(cfg.LED_strip_mode==0) {
           pixels.clear();
           pixels.show();
         }
       }
-      if(String(w3srv.arg(i)).equals("vibration_mode")) {
+      else if(param.equals("vibration_mode")) {
         cfg.vibration_mode++;
         if(cfg.vibration_mode>1) {
           cfg.vibration_mode = 0;
         }
       }
-      if(String(w3srv.arg(i)).equals("micro_dot_pHAT")) {
+      else if(param.equals("micro_dot_pHAT")) {
         cfg.micro_dot_pHAT++;
         if(cfg.micro_dot_pHAT>1) {
           cfg.micro_dot_pHAT = 0;
@@ -571,22 +693,28 @@ void handleSwitchConfig() {
           MD.writeString("*M5NS*");
         }
       }
-      if(String(w3srv.arg(i)).equals("dev_mode")) {
+      else if(param.equals("dev_mode")) {
         cfg.dev_mode = !cfg.dev_mode;
       }
-      if(String(w3srv.arg(i)).equals("disable_web_server")) {
-        cfg.disable_web_server = !cfg.disable_web_server;
+      else if(param.equals("disable_web_server")) {
+        // rowSeg's "v" is 1=Enabled/0=Disabled (the state shown to the user), which is the
+        // inverse of disable_web_server itself.
+        if(haveVal) cfg.disable_web_server = (val==0);
+        else cfg.disable_web_server = !cfg.disable_web_server;
       }
     }
   }
-  message += "</body>\r\n";
-  message += "</html>\r\n";
-  w3srv.send(200, "text/html", message);
+
+  // Instant redirect instead of the old 1s meta-refresh page - dropdown/toggle changes
+  // feel immediate and each switch no longer costs ~0.5KB of throwaway HTML. Carries the
+  // section id back so only the section just changed stays expanded.
+  w3srv.sendHeader("Location", "/?s=" + sec);
+  w3srv.send(303, "text/plain", "");
 
   if (!cfg.is_task_bootstrapping) {
     M5.Lcd.fillScreen(BLACK);
     draw_page();
-    if(cfg.LED_strip_mode != 0) { 
+    if(cfg.LED_strip_mode != 0) {
       pixels.show();
     }
   }
@@ -597,155 +725,97 @@ void handleEditConfigItem() {
   int decpl = cfg.show_mgdl?0:1;
   int mult = cfg.show_mgdl?18:1;
   int numSsids = WiFi.scanNetworks( );
+  String sec = w3srv.hasArg("s") ? w3srv.arg("s") : String("st");
 
-  String message = "<!DOCTYPE HTML>\r\n";
-  message += "<html>\r\n";
-  message += "<head>\r\n"; 
-  message += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\r\n";
-  // message += "<meta http-equiv=\"refresh\" content=\"30;url=/\" />\r\n";
-  message += "<style>\r\n";  
-  message += "html { font-family: Segoe UI; display: inline-block; margin: 5px auto; text-align: left;}\r\n";
-  message += "</style>\r\n";  
-  message += "<title>M5 Nightscout - "; message += cfg.userName;  message += "</title>\r\n";
-  message += "</head>\r\n";
-  message += "<body>\r\n";
-  message += "<h1>M5Stack Nightscout monitor for "; message += cfg.userName; message += "!</h1>\r\n";
+  String message;
+  message.reserve(2048);
+  pageHeadOpen(message, NULL);
   message += "<p>Edit configuration item.</p>\r\n";
   message += "<form action=\"/getedititem\" method=\"post\">\r\n";
-  // char itemName[60];
-  // char itemValue[250];
+  message += "<input type=\"hidden\" name=\"s\" value=\""; message += sec; message += "\">\r\n";
   if(String(w3srv.argName(0)).equals("param")) {
     if(String(w3srv.arg(0)).equals("userName")) {
-      message += "M5Stack user name: \r\n";
-      message += "<input type=\"text\" name=\"" + String(w3srv.arg(0)) + "\" value=\"" + String(cfg.userName) + "\" size=\"20\" maxlength=\"32\"><br>\r\n";
+      editRow(message, "User name", "<input type=\"text\" name=\"" + String(w3srv.arg(0)) + "\" value=\"" + String(cfg.userName) + "\" size=\"20\" maxlength=\"32\">");
     }
     if(String(w3srv.arg(0)).equals("NSurl")) {
-      message += "Nightscout site URL: \r\n";
-      message += "<input type=\"text\" name=\"url\" value=\"" + String(cfg.url) + "\" size=\"32\" maxlength=\"128\"> \r\n";
-      message += " (for example <i>sitename.herokuapp.com</i>)<br>\r\n";
-      message += "Security token: \r\n";
-      message += "<input type=\"text\" name=\"token\" value=\"" + String(cfg.token) + "\" size=\"64\" maxlength=\"64\"> \r\n";
-      message += " (empty, if not used)<br>\r\n";
+      editRow(message, "Nightscout URL", "<input type=\"text\" name=\"url\" value=\"" + String(cfg.url) + "\" size=\"28\" maxlength=\"128\">", "e.g. sitename.herokuapp.com");
+      editRow(message, "Security token", "<input type=\"text\" name=\"token\" value=\"" + String(cfg.token) + "\" size=\"28\" maxlength=\"64\">", "empty if not used");
     }
     if(String(w3srv.arg(0)).equals("deviceName")) {
-      message += "M5Stack device name: \r\n";
-      message += "<input type=\"text\" name=\"deviceName\" value=\"" + String(cfg.deviceName) + "\" size=\"12\" maxlength=\"32\">.local \r\n";
-      message += "(for internet browser access)<br>\r\n";
-      message += "<font color=red>Warning: changes work only after save to M5NS.INI and reboot of the M5Stack device.</font><br>\r\n";
+      editRow(message, "Device name", "<input type=\"text\" name=\"deviceName\" value=\"" + String(cfg.deviceName) + "\" size=\"12\" maxlength=\"32\">.local");
+      message += "<p class=\"warn\">Applied after Save - the device will restart automatically.</p>\r\n";
     }
     if(String(w3srv.arg(0)).equals("timeZoneDST")) {
-      message += "Time zone offset in seconds: \r\n";
-      message += "<input type=\"text\" name=\"timeZone\" value=\"" + String(cfg.timeZone) + "\" size=\"6\" maxlength=\"6\"> \r\n";
-      message += "(for example 3600 for most of Europe)<br>\r\n";
-      message += "(see <a href=\"https://www.epochconverter.com/timezones\">https://www.epochconverter.com/timezones</a>)<br>\r\n";
-      message += "Daylight saving time offset: \r\n";
-      message += "<input type=\"text\" name=\"dst\" value=\"" + String(cfg.dst) + "\" size=\"6\" maxlength=\"6\"> \r\n";
-      message += "(usually 0 in winter and 3600 in summer)<br>\r\n";
-      message += "<font color=red>Warning: changes work only after save to M5NS.INI and reboot of the M5Stack device.</font><br>\r\n";
+      editRow(message, "Time zone offset", "<input type=\"text\" name=\"timeZone\" value=\"" + String(cfg.timeZone) + "\" size=\"6\" maxlength=\"6\"> s", "e.g. 3600 for most of Europe - see epochconverter.com/timezones");
+      editRow(message, "DST offset", "<input type=\"text\" name=\"dst\" value=\"" + String(cfg.dst) + "\" size=\"6\" maxlength=\"6\"> s", "usually 0 in winter, 3600 in summer");
+      message += "<p class=\"warn\">Applied after Save - the device will restart automatically.</p>\r\n";
     }
     if(String(w3srv.arg(0)).equals("restartAt")) {
-      message += "Restart at time: \r\n";
-      message += "<input type=\"text\" name=\"restart_at_time\" value=\"" + String(cfg.restart_at_time) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += "(device restart time in 24h HH:MM format or NORES for no restart at any time)<br>\r\n";
-      message += "Restart at logged number of errors: \r\n";
-      message += "<input type=\"text\" name=\"restart_at_logged_errors\" value=\"" + String(cfg.restart_at_logged_errors) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += "(0 = do not restart)<br>\r\n";
+      editRow(message, "Restart at time", "<input type=\"text\" name=\"restart_at_time\" value=\"" + String(cfg.restart_at_time) + "\" size=\"5\" maxlength=\"5\">", "24h HH:MM, or NORES for never");
+      editRow(message, "Restart after errors", "<input type=\"text\" name=\"restart_at_logged_errors\" value=\"" + String(cfg.restart_at_logged_errors) + "\" size=\"5\" maxlength=\"5\">", "0 = never");
     }
     if(String(w3srv.arg(0)).equals("alarmTiming")) {
-      message += "Snooze timeout: \r\n";
-      message += "<input type=\"text\" name=\"snooze_timeout\" value=\"" + String(cfg.snooze_timeout) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += "minutes<br>\r\n";
-      message += "Repeat alarm/warning every \r\n";
-      message += "<input type=\"text\" name=\"alarm_repeat\" value=\"" + String(cfg.alarm_repeat) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += "minutes (0 = as fast as it goes)<br>\r\n";
+      editRow(message, "Snooze timeout", "<input type=\"text\" name=\"snooze_timeout\" value=\"" + String(cfg.snooze_timeout) + "\" size=\"5\" maxlength=\"5\"> min");
+      editRow(message, "Repeat alarm every", "<input type=\"text\" name=\"alarm_repeat\" value=\"" + String(cfg.alarm_repeat) + "\" size=\"5\" maxlength=\"5\"> min", "0 = as fast as it goes");
     }
     if(String(w3srv.arg(0)).equals("dispColors")) {
-      message += "<font color=\"#BB9900\">Display yellow below \r\n";
-      message += "<input type=\"text\" name=\"yellow_low\" value=\"" + String(cfg.yellow_low*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += " " + sgvUnits + "</font><br>\r\n";
-      message += "<font color=\"#BB9900\">Display yellow above \r\n";
-      message += "<input type=\"text\" name=\"yellow_high\" value=\"" + String(cfg.yellow_high*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += " " + sgvUnits + "</font><br><br>\r\n";
-      message += "<font color=\"Red\">Display red below \r\n";
-      message += "<input type=\"text\" name=\"red_low\" value=\"" + String(cfg.red_low*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += " " + sgvUnits + "</font><br>\r\n";
-      message += "<font color=\"Red\">Display red above \r\n";
-      message += "<input type=\"text\" name=\"red_high\" value=\"" + String(cfg.red_high*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += " " + sgvUnits + "</font><br>\r\n";
+      editRow(message, "Yellow below", "<input type=\"text\" name=\"yellow_low\" value=\"" + String(cfg.yellow_low*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> " + sgvUnits, NULL, "y");
+      editRow(message, "Yellow above", "<input type=\"text\" name=\"yellow_high\" value=\"" + String(cfg.yellow_high*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> " + sgvUnits, NULL, "y");
+      editRow(message, "Red below", "<input type=\"text\" name=\"red_low\" value=\"" + String(cfg.red_low*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> " + sgvUnits, NULL, "r");
+      editRow(message, "Red above", "<input type=\"text\" name=\"red_high\" value=\"" + String(cfg.red_high*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> " + sgvUnits, NULL, "r");
     }
     if(String(w3srv.arg(0)).equals("sndAlarms")) {
-      message += "Warning sound below \r\n";
-      message += "<input type=\"text\" name=\"snd_warning\" value=\"" + String(cfg.snd_warning*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += " " + sgvUnits + "<br>\r\n";
-      message += "Warning sound above \r\n";
-      message += "<input type=\"text\" name=\"snd_warning_high\" value=\"" + String(cfg.snd_warning_high*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += " " + sgvUnits + "<br><br>\r\n";
-      message += "Alarm sound below \r\n";
-      message += "<input type=\"text\" name=\"snd_alarm\" value=\"" + String(cfg.snd_alarm*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += " " + sgvUnits + "<br>\r\n";
-      message += "Alarm sound above \r\n";
-      message += "<input type=\"text\" name=\"snd_alarm_high\" value=\"" + String(cfg.snd_alarm_high*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += " " + sgvUnits + "<br><br>\r\n";
-      message += "Warning sound when no reading for \r\n";
-      message += "<input type=\"text\" name=\"snd_no_readings\" value=\"" + String(cfg.snd_no_readings) + "\" size=\"5\" maxlength=\"5\"> \r\n";
-      message += " minutes<br><br>\r\n";
-      message += "Warning sound volume: \r\n";
-      message += "<input type=\"text\" name=\"warning_volume\" value=\"" + String(cfg.warning_volume) + "\" size=\"5\" maxlength=\"5\"> %<br>\r\n";
-      message += "Alarm sound volume: \r\n";
-      message += "<input type=\"text\" name=\"alarm_volume\" value=\"" + String(cfg.alarm_volume) + "\" size=\"3\" maxlength=\"3\"> %<br>\r\n";
+      editRow(message, "Warning sound below", "<input type=\"text\" name=\"snd_warning\" value=\"" + String(cfg.snd_warning*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> " + sgvUnits, NULL, "t");
+      editRow(message, "Warning sound above", "<input type=\"text\" name=\"snd_warning_high\" value=\"" + String(cfg.snd_warning_high*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> " + sgvUnits, NULL, "t");
+      editRow(message, "Alarm sound below", "<input type=\"text\" name=\"snd_alarm\" value=\"" + String(cfg.snd_alarm*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> " + sgvUnits, NULL, "t");
+      editRow(message, "Alarm sound above", "<input type=\"text\" name=\"snd_alarm_high\" value=\"" + String(cfg.snd_alarm_high*mult, decpl) + "\" size=\"5\" maxlength=\"5\"> " + sgvUnits, NULL, "t");
+      editRow(message, "No-readings warning", "<input type=\"text\" name=\"snd_no_readings\" value=\"" + String(cfg.snd_no_readings) + "\" size=\"5\" maxlength=\"5\"> min", NULL, "t");
+      editRow(message, "Warning sound volume", "<input type=\"text\" name=\"warning_volume\" value=\"" + String(cfg.warning_volume) + "\" size=\"5\" maxlength=\"5\"> %", NULL, "t");
+      editRow(message, "Alarm sound volume", "<input type=\"text\" name=\"alarm_volume\" value=\"" + String(cfg.alarm_volume) + "\" size=\"3\" maxlength=\"3\"> %", NULL, "t");
     }
     if(String(w3srv.arg(0)).equals("brightness")) {
-      message += "Brightness settings steps:<br />\r\n";
-      message += "Step 1: <input type=\"text\" name=\"brightness1\" value=\"" + String(cfg.brightness1) + "\" size=\"3\" maxlength=\"3\"> % (default)<br />\r\n";
-      message += "Step 2: <input type=\"text\" name=\"brightness2\" value=\"" + String(cfg.brightness2) + "\" size=\"3\" maxlength=\"3\"> %<br />\r\n";
-      message += "Step 3: <input type=\"text\" name=\"brightness3\" value=\"" + String(cfg.brightness3) + "\" size=\"3\" maxlength=\"3\"> %<br />\r\n";
+      editRow(message, "Step 1 (default)", "<input type=\"text\" name=\"brightness1\" value=\"" + String(cfg.brightness1) + "\" size=\"3\" maxlength=\"3\"> %");
+      editRow(message, "Step 2", "<input type=\"text\" name=\"brightness2\" value=\"" + String(cfg.brightness2) + "\" size=\"3\" maxlength=\"3\"> %");
+      editRow(message, "Step 3", "<input type=\"text\" name=\"brightness3\" value=\"" + String(cfg.brightness3) + "\" size=\"3\" maxlength=\"3\"> %");
     }
     if(String(w3srv.arg(0)).equals("led_strip")) {
-      message += "RGB LED strip setup:<br />\r\n";
-      message += "LED strip pin: <input type=\"text\" name=\"LED_strip_pin\" value=\"" + String(cfg.LED_strip_pin) + "\" size=\"3\" maxlength=\"3\"> <br />\r\n";
-      message += "15 = M5Stack Fire internal, 21 = red PORT A connector (not recommended, collides with I2C, first LED will blink), 26 = black PORT B connector, 17 = blue PORT C connector<br />\r\n";
-      message += "LED strip count: <input type=\"text\" name=\"LED_strip_count\" value=\"" + String(cfg.LED_strip_count) + "\" size=\"3\" maxlength=\"3\"> <br />\r\n";
-      message += "LED strip brightness: <input type=\"text\" name=\"LED_strip_brightness\" value=\"" + String(cfg.LED_strip_brightness) + "\" size=\"3\" maxlength=\"3\"> %<br />\r\n";
-      message += "1-100%, for more than 10 LEDs use 10%, 5% or even less otherwise load current will crash the M5Stack<br />\r\n";
+      editRow(message, "LED strip pin", "<input type=\"text\" name=\"LED_strip_pin\" value=\"" + String(cfg.LED_strip_pin) + "\" size=\"3\" maxlength=\"3\">", "15 = Fire internal, 26 = PORT B, 17 = PORT C (21/PORT A collides with I2C)");
+      editRow(message, "LED strip count", "<input type=\"text\" name=\"LED_strip_count\" value=\"" + String(cfg.LED_strip_count) + "\" size=\"3\" maxlength=\"3\">");
+      editRow(message, "LED strip brightness", "<input type=\"text\" name=\"LED_strip_brightness\" value=\"" + String(cfg.LED_strip_brightness) + "\" size=\"3\" maxlength=\"3\"> %", "use 5-10% for more than 10 LEDs, or load current will crash the M5Stack");
     }
     if(String(w3srv.arg(0)).equals("vibration_motor")) {
-      message += "Vibration motor unit setup:<br />\r\n";
-      message += "Vibration motor pin: <input type=\"text\" name=\"vibration_pin\" value=\"" + String(cfg.vibration_pin) + "\" size=\"3\" maxlength=\"3\"> <br />\r\n";
-      message += "26 = black PORT B connector, 17 = blue PORT C connector, DO NOT USE pin 21 = red PORT A connector (collides with I2C) <br />\r\n";
-      message += "Vibration motor strength: <input type=\"text\" name=\"vibration_strength\" value=\"" + String(cfg.vibration_strength) + "\" size=\"3\" maxlength=\"3\"> <br />\r\n";
-      message += "0-1023, recommended range is 256-512, hig values can crash the M5Stack due to load current <br />\r\n";
+      editRow(message, "Vibration motor pin", "<input type=\"text\" name=\"vibration_pin\" value=\"" + String(cfg.vibration_pin) + "\" size=\"3\" maxlength=\"3\">", "26 = PORT B, 17 = PORT C - do not use 21/PORT A (collides with I2C)");
+      editRow(message, "Vibration strength", "<input type=\"text\" name=\"vibration_strength\" value=\"" + String(cfg.vibration_strength) + "\" size=\"3\" maxlength=\"3\">", "0-1023, recommended 256-512 - higher can crash the M5Stack");
     }
     if(String(w3srv.arg(0)).equals("wlans")) {
-      message += "Wifi LAN SSIDs + passwords:<br />\r\n";
       for(int i=1; i<10; i++) {
-        message += "[wlan"; message += i; message += "] ";
+        String ssidInput;
         if (cfg.wlanssid[i][0] != 0) {
-          message += "SSID: <input type=\"text\" name=\"wlanssid" + String(i) + "\" value=\"" + String(cfg.wlanssid[i]) + "\" size=\"12\" maxlength=\"63\"> , \r\n";
+          ssidInput = "<input type=\"text\" name=\"wlanssid" + String(i) + "\" value=\"" + String(cfg.wlanssid[i]) + "\" size=\"12\" maxlength=\"63\">";
         } else {
-          message += "<select name=\"wlanssid" + String(i) + "\">\n";
-          message += "<option selected=\"default\" value=\"\">none</option>";
+          ssidInput = "<select name=\"wlanssid" + String(i) + "\">";
+          ssidInput += "<option selected value=\"\">none</option>";
           for (int j=0; j<numSsids; j++) {
-            message += "<option value=\"" + String(WiFi.SSID(j)) + "\">" + String(WiFi.SSID(j)) + "</option>";
+            ssidInput += "<option value=\"" + String(WiFi.SSID(j)) + "\">" + String(WiFi.SSID(j)) + "</option>";
           }
-          message += "</select>\n";
-
+          ssidInput += "</select>";
         }
-        message += "PASS: <input type=\"password\" name=\"wlanpass" + String(i) + "\" value=\"" + String(cfg.wlanpass[i]) + "\" size=\"12\" maxlength=\"63\">\r\n";
-        if(i==0)
-          message += " Do not use this [wlan0] row unless necessary, reserved for autoconfig.\r\n";
-        message += "<br />\r\n";
+        ssidInput += " <input type=\"password\" name=\"wlanpass" + String(i) + "\" value=\"" + String(cfg.wlanpass[i]) + "\" size=\"12\" maxlength=\"63\" placeholder=\"password\">";
+        char lbl[10]; snprintf(lbl, sizeof(lbl), "wlan%d", i);
+        editRow(message, lbl, ssidInput);
       }
-      message += "<font color=red>Warning: changes work only after save to M5NS.INI and reboot of the M5Stack device.</font><br>\r\n";
+      message += "<p class=\"warn\">Applied after Save - the device will restart automatically.</p>\r\n";
     }
   }
-  message += "<br />\r\n";
-  message += "<input type=\"submit\" name=\"Submit\" value=\"&nbsp;OK&nbsp;\">\r\n";
-  message += "<input type=\"button\" name=\"Cancel\" value=\"Cancel\" onClick=\"window.location.href='/';\" />\r\n";
+  message += "<div style=\"margin-top:10px\">\r\n";
+  message += "<input type=\"submit\" class=\"btn\" name=\"Submit\" value=\"Apply\">\r\n";
+  message += "<input type=\"button\" class=\"btn2\" name=\"Cancel\" value=\"Cancel\" onClick=\"window.location.href='/?s=" + sec + "';\" />\r\n";
+  message += "</div>\r\n";
   message += "</form>\r\n";
   message += "</body>\r\n";
   message += "</html>\r\n";
   w3srv.send(200, "text/html", message);
-  if(cfg.LED_strip_mode != 0) { 
+  if(cfg.LED_strip_mode != 0) {
     pixels.show();
   }
 }
@@ -756,18 +826,17 @@ void handleGetEditConfigItem() {
   float mult = cfg.show_mgdl?18.0:1.0;
   String tmpStr;
 
-  String message = "<!DOCTYPE HTML>\r\n";
-  message += "<html>\r\n";
-  message += "<head>\r\n"; 
-  message += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\r\n";
-  message += "<meta http-equiv=\"refresh\" content=\"1;url=/\" />\r\n";
-  message += "<style>\r\n";  
-  message += "html { font-family: Segoe UI; display: inline-block; margin: 5px auto; text-align: left;}\r\n";
-  message += "</style>\r\n";  
-  message += "<title>M5 Nightscout - "; message += cfg.userName;  message += "</title>\r\n";
-  message += "</head>\r\n";
-  message += "<body>\r\n";
-  message += "<h1>M5Stack Nightscout monitor for "; message += cfg.userName; message += "!</h1>\r\n";
+  String sec = "st";
+  for (uint8_t i = 0; i < w3srv.args(); i++) {
+    if(String(w3srv.argName(i)).equals("s")) {
+      sec = String(w3srv.arg(i));
+    }
+  }
+
+  String message;
+  message.reserve(768);
+  String meta = "<meta http-equiv=\"refresh\" content=\"1;url=/?s=" + sec + "\" />\r\n";
+  pageHeadOpen(message, meta.c_str());
   message += "<p>Updating edited items in M5Stack Nightscout monitor configuration (NOT saving to M5NS.INI file).</p>\r\n";
   for (uint8_t i = 0; i < w3srv.args(); i++) {
     if(String(w3srv.argName(i)).equals("userName")) {
@@ -780,13 +849,19 @@ void handleGetEditConfigItem() {
       strncpy(cfg.token, String(w3srv.arg(i)).c_str(), 64);
     }
     if(String(w3srv.argName(i)).equals("deviceName")) {
-      strncpy(cfg.deviceName, String(w3srv.arg(i)).c_str(), 32);
+      String newVal = String(w3srv.arg(i));
+      if(!newVal.equals(cfg.deviceName)) restartPending = true;
+      strncpy(cfg.deviceName, newVal.c_str(), 32);
     }
     if(String(w3srv.argName(i)).equals("timeZone")) {
-      cfg.timeZone = String(w3srv.arg(i)).toInt();
+      long newVal = String(w3srv.arg(i)).toInt();
+      if(newVal != cfg.timeZone) restartPending = true;
+      cfg.timeZone = newVal;
     }
     if(String(w3srv.argName(i)).equals("dst")) {
-      cfg.dst = String(w3srv.arg(i)).toInt();
+      long newVal = String(w3srv.arg(i)).toInt();
+      if(newVal != cfg.dst) restartPending = true;
+      cfg.dst = newVal;
     }
     if(String(w3srv.argName(i)).equals("restart_at_time")) {
       strncpy(cfg.restart_at_time, String(w3srv.arg(i)).c_str(), 10);
@@ -888,14 +963,18 @@ void handleGetEditConfigItem() {
       tmpStr = String(w3srv.argName(i));
       tmpStr.remove(0, 8);
       int nr = tmpStr.toInt();
-      message += "WLAN SSID [" + tmpStr + "] = " + String(w3srv.arg(i)) + " (" + String(w3srv.arg(i)).length() + ")<br />\r\n";
-      strncpy(cfg.wlanssid[nr], String(w3srv.arg(i)).c_str(), 32);
+      String newVal = String(w3srv.arg(i));
+      if(!newVal.equals(cfg.wlanssid[nr])) restartPending = true;
+      message += "WLAN SSID [" + tmpStr + "] = " + newVal + " (" + newVal.length() + ")<br />\r\n";
+      strncpy(cfg.wlanssid[nr], newVal.c_str(), 32);
     }
     if(String(w3srv.argName(i)).startsWith("wlanpass")) {
       tmpStr = String(w3srv.argName(i));
       tmpStr.remove(0, 8);
       int nr = tmpStr.toInt();
-      
+      String newVal = String(w3srv.arg(i));
+      if(!newVal.equals(cfg.wlanpass[nr])) restartPending = true;
+
       // message += "WLAN PASS [" + tmpStr + "] = " + String(w3srv.arg(i)) + " (" + String(w3srv.arg(i)).length() + ")<br />\r\n";
 
       message += "WLAN PASS [" + tmpStr + "] = ";
@@ -923,21 +1002,22 @@ void handleSaveConfig() {
   int decpl = cfg.show_mgdl?0:1;
   int mult = cfg.show_mgdl?18:1;
   String tmpStr;
-    
-  String message = "<!DOCTYPE HTML>\r\n";
-  message += "<html>\r\n";
-  message += "<head>\r\n"; 
-  message += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\r\n";
-  message += "<meta http-equiv=\"refresh\" content=\"2;url=/\" />\r\n";
-  message += "<style>\r\n";  
-  message += "html { font-family: Segoe UI; display: inline-block; margin: 5px auto; text-align: left;}\r\n";
-  message += "</style>\r\n";  
-  message += "<title>M5 Nightscout - "; message += cfg.userName;  message += "</title>\r\n";
-  message += "</head>\r\n";
-  message += "<body>\r\n";
-  message += "<h1>M5Stack Nightscout monitor for "; message += cfg.userName; message += "!</h1>\r\n";
+
+  // Bootstrap mode always restarts once configured (existing behavior); otherwise restart
+  // only if an edited item that needs it (device name, time zone/DST, WiFi networks) was
+  // actually changed - tracked in handleGetEditConfigItem() via restartPending.
+  bool willRestart = cfg.is_task_bootstrapping || restartPending;
+
+  String message;
+  message.reserve(768);
+  pageHeadOpen(message, willRestart
+    ? "<meta http-equiv=\"refresh\" content=\"5;url=/\" />\r\n"
+    : "<meta http-equiv=\"refresh\" content=\"2;url=/\" />\r\n");
   message += "<p>Saving configuration to M5NS.INI file.</p>\r\n";
   message += "<p>Backup copy of current M5NS.INI should be blaced in M5NS.BAK file.</p>\r\n";
+  if (willRestart) {
+    message += "<p><b>Restarting to apply changes...</b></p>\r\n";
+  }
   message += "</body>\r\n";
   message += "</html>\r\n";
   
@@ -1059,17 +1139,20 @@ void handleSaveConfig() {
 
   w3srv.send(200, "text/html", message);
   delay(100);
-  
 
   if (cfg.is_task_bootstrapping) {
     M5.update();
     WiFi.softAPdisconnect(true);
     delay(1000);
     ESP.restart();
+  } else if (restartPending) {
+    M5.update();
+    delay(1000);
+    ESP.restart();
   } else {
     M5.Lcd.fillScreen(BLACK);
     draw_page();
-    if(cfg.LED_strip_mode != 0) { 
+    if(cfg.LED_strip_mode != 0) {
       pixels.show();
     }
   }

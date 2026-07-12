@@ -8,6 +8,7 @@ extern Adafruit_NeoPixel pixels;
 extern MicroDot MD;
 
 void handleRoot();
+void handleFwCheck();
 void handleUpdate();
 void handleSwitchConfig();
 void handleEditConfigItem();
