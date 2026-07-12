@@ -3,6 +3,12 @@
 ## Revisions
 
 
+### 12 July 2026 (QR code pairing + web config page)
+
+* Added a QR code to the SoftAP setup screen so a phone can join the device's Wi-Fi with one tap instead of typing the generated passphrase (`WIFI:S:...;T:WPA;P:...;;` format, recognized natively by iOS/Android camera apps).
+* Added a new display page (page 4, cycled with the right button) showing a QR code encoding the device's local IP address, so the web config page can be opened from a phone camera without typing an address or relying on `<name>.local` (which is ambiguous with multiple devices on the same network). Falls back to a status message if Wi-Fi is down or the web server is disabled.
+* Also hardened `Scripts/build.ps1`: each build target now uses its own arduino-cli build-cache folder (previously all three shared one folder derived from the sketch path, so concurrent builds of different targets corrupted each other's object files) and added a `-Clean` switch to force a fresh build. A full `-Target All` build is now treated as a release and auto-bumps the `YYYYMMDDnn` firmware version (same-day sequence, or a new day starts at `01`) before compiling, so publishing an OTA update no longer requires a manual version edit.
+
 ### 11 July 2026 (remove Sugarmate integration)
 
 * Removed the obsolete Sugarmate follower workaround (`is_Sugarmate` detection/parsing path, used historically for Dexcom via `sugarmate.io` JSON URLs). Only the native Nightscout API path remains; behavior for Nightscout users is unchanged.

@@ -1,3 +1,2 @@
-Migrated to M5Unified: one firmware now supports Basic/Fire/Core2/CoreS3.
-Fixed regressions from the M5Unified migration; removed Sugarmate integration.
-OTA updates are now served directly from GitHub (raw.githubusercontent.com).
+New display page with a QR code to open the web config from your phone.
+SoftAP setup screen now shows a QR code to join the device's Wi-Fi.

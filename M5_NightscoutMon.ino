@@ -68,7 +68,7 @@ SHT3X sht30;
 #include "microdot.h"
 MicroDot MD;
 
-String M5NSversion("2026071201");
+String M5NSversion("2026071202");
 
 #define VIBfreq 10000
 #define VIBchannel 14
@@ -152,7 +152,9 @@ int err_log_count = 0;
 int rcnt = 4;
 
 int dispPage = 0;
-#define MAX_PAGE 3
+#define PAGE_ERRLOG 3
+#define PAGE_WEBQR  4
+#define MAX_PAGE    PAGE_WEBQR
 int maxPage = MAX_PAGE;
 
 // icon positions for the first page - WiFi/log, Snooze, Battery
@@ -2068,7 +2070,7 @@ void draw_page() {
     }
     break;
     
-    case MAX_PAGE: {
+    case PAGE_ERRLOG: {
       // display error log
       char tmpStr[64];
       HTTPClient http;
@@ -2138,6 +2140,44 @@ void draw_page() {
       M5.Lcd.drawString(tmpStr, 0, 20+9*18);
       sprintf(tmpStr, "Version: %s", M5NSversion.c_str());
       M5.Lcd.drawString(tmpStr, 0, 20+10*18);
+      handleAlarmsInfoLine(&ns);
+      drawBatteryStatus(icon_xpos[2], icon_ypos[2]);
+      drawLogWarningIcon();
+    }
+    break;
+
+    case PAGE_WEBQR: {
+      // QR code to the device's web config page - scan with a phone camera to open it directly
+      char url[40];
+      const char *msg = NULL;
+      IPAddress ip = WiFi.localIP();
+
+      if(cfg.disable_web_server)
+        msg = "Web server off";
+      else if((WiFi.status()!=WL_CONNECTED) || ((uint32_t)ip == 0))
+        msg = "No WiFi";
+      else
+        snprintf(url, sizeof(url), "http://%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+
+      M5.Lcd.fillRect(0, 0, 264, 18, TFT_BLACK);
+      M5.Lcd.setFreeFont(FMB9);
+      M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+      M5.Lcd.drawString("Scan to open config", 0, 0);
+
+      // opaque white card is self-covering, so this redraws flicker-free every 15s
+      M5.Lcd.fillRect(72, 20, 176, 176, TFT_WHITE);
+      M5.Lcd.fillRect(0, 198, 320, 20, TFT_BLACK);
+      if(msg) {
+        M5.Lcd.setTextDatum(MC_DATUM);
+        M5.Lcd.setTextColor(TFT_BLACK, TFT_WHITE);
+        M5.Lcd.drawString(msg, 160, 108);
+      } else {
+        M5.Lcd.qrcode(url, 88, 36, 144, 1);
+        M5.Lcd.setTextDatum(TC_DATUM);
+        M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+        M5.Lcd.drawString(url, 160, 198);
+      }
+
       handleAlarmsInfoLine(&ns);
       drawBatteryStatus(icon_xpos[2], icon_ypos[2]);
       drawLogWarningIcon();

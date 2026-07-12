@@ -133,7 +133,7 @@ pass = pass2
 
 ### Display
 
-There are currently 3 display pages, that can be changed by a short press of the right button. The button does not work when the device communicated with Nightscout (small blue WiFi icon is displayed).
+There are currently 5 display pages, that can be changed by a short press of the right button. The button does not work when the device communicated with Nightscout (small blue WiFi icon is displayed).
 
 **Page 0 - default page**  
 What you see on the display is a matter of your M5NS.INI and Nightscout configuration. By default you will see current time, date and user name from config file in upper left corner. You will see IOB (Insulin On Board) an COB (Carbs On Board) values below the name. Right from the IOB/COB value is current BG delta (difference from the last reading, trend where the BG is going). Box with time difference from last valid data from Nighscout is displayed in upper right corner. Delay of 5 mins is OK and the box has grey color, 5-15 mins is warning and the box will have white background, more than 15 mins without a valid data is error and the box background will be red. There is also possibility to set sound warning on data delay in M5NS.INI.
@@ -158,6 +158,9 @@ Bottom info line is the same as on page 0.
 
 **Error Log page**
 Displays last 10 record errors and total number of errors record since last restart. Occasional communication errors, such as "timeout" or "connection refused" are normal and happen sometimes due to WiFi and internet connection and Nightscout site status. If you have a lot of errors every few minutes, consider to move your M5Stack to a different place or extend WiFi signal.  
+
+**Web config QR code page**
+Shows a QR code encoding the device's local IP address (`http://a.b.c.d`). Scan it with a phone camera to open the device's web configuration page directly, without needing to type in an address or rely on `<name>.local` (which doesn't work reliably if several M5NS devices are on the same network). If WiFi is disconnected or the internal web server is disabled in M5NS.INI, the page shows a message instead of the QR code.
 <br/>
 
 ### Buttons
