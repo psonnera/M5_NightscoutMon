@@ -1,0 +1,3 @@
+Migrated to M5Unified: one firmware now supports Basic/Fire/Core2/CoreS3.
+Fixed regressions from the M5Unified migration; removed Sugarmate integration.
+OTA updates are now served directly from GitHub (raw.githubusercontent.com).

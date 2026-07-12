@@ -1,11 +1,7 @@
 #ifndef _M5NSCONFIG_H
 #define _M5NSCONFIG_H
 
-#ifdef ARDUINO_M5STACK_Core2
-  #include <M5Core2.h>
-#else
-  #include <M5Stack.h>
-#endif
+#include <M5Unified.h>
 
 #include "IniFile.h"
 
@@ -74,8 +70,7 @@ struct NSinfo {
   float sensSgvMgDl = 0;
   float sensSgv = 0;
   float last10sgv[10];
-  bool is_xDrip = 0;  
-  bool is_Sugarmate = 0;  
+  bool is_xDrip = 0;
   int arrowAngle = 180;
   float iob = 0;
   char iob_display[16];

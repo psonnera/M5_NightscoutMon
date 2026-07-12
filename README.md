@@ -8,7 +8,7 @@
 ###### This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 ###### This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
 ###### You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>. 
-###### This software uses some 3rd party libraries:<br/>IniFile by Steve Marple (GNU LGPL v2.1)<br/>ArduinoJson by Benoit BLANCHON (MIT License)<br/>IoT Icon Set by Artur Funk (GPL v3)<br/>DHT12 by Bobadas (Public domain)<br/><br/>Additions to the code:<br/>Peter Leimbach (Nightscout token)<br/>Patrick Sonnerat (Dexcom Sugarmate connection)<br/>Sulka Haro (Nightscout API queries help)<br/>Dominik Dzienia _(Refactoring, migration to Platform.IO)_
+###### This software uses some 3rd party libraries:<br/>IniFile by Steve Marple (GNU LGPL v2.1)<br/>ArduinoJson by Benoit BLANCHON (MIT License)<br/>IoT Icon Set by Artur Funk (GPL v3)<br/>DHT12 by Bobadas (Public domain)<br/><br/>Additions to the code:<br/>Peter Leimbach (Nightscout token)<br/>Sulka Haro (Nightscout API queries help)<br/>Dominik Dzienia _(Refactoring, migration to Platform.IO)_
 
 ### Contents
 [What is this good for?](#m5stack-nightscout-monitor-1)  
@@ -19,6 +19,7 @@
 [Buttons](#buttons)  
 [Battery](#battery)  
 [Installation and support](#installation-and-support)  
+[Firmware updates (OTA)](#firmware-updates-ota)  
 [Donations - support the project](#donations) :+1:
 
 
@@ -32,7 +33,7 @@ We use Abbott Freestyle Libre, together with MiaoMiao transmitter. It transmits 
 
 Some people were asking for the software. I am not a professional programmer, I am a hardware engineer, but I work more with tables, numbers and e-mails recent years, so I was a little bit shy about the code. As there is quite a lot of people interested in something that shows current values and makes alarms during nights, I decided to release the code as an Open Source.
 
-If you know what to do with it, just download the code, modify it any way it suits you and use it in M5Stack. If you do not know how to handle the source code, just find someone who can. It is easy, just open it in Arduino IDE, download M5Stack libraries, Arduino JSON library and build it to your M5Stack. M5Stack is in more versions, the Core is just enough. The code does not use any features of the higher models. The official M5Stack store is here https://m5stack.com/products/basic-core-iot-development-kit. The current price is about 27.95 USD (9 February 2020). You can also buy it on Aliexpress https://www.aliexpress.com/item/M5Stack-Official-Stock-Offer-ESP32-Basic-Core-Development-Kit-Extensible-Micro-Control-Wifi-BLE-IoT-Prototype/32837164440.html or elsewhere.
+If you know what to do with it, just download the code, modify it any way it suits you and use it in M5Stack. If you do not know how to handle the source code, just find someone who can. It is easy, just open it in Arduino IDE, install the **M5Unified**, **ArduinoJson** and **Adafruit NeoPixel** libraries and build it to your M5Stack. The firmware uses the M5Unified library and auto-detects the board, so a single build supports the whole current 16&nbsp;MB lineup: **M5Stack Basic v2.7, Fire v2.7, Core2 v1.1 and CoreS3 (ESP32-S3)**. When building for the classic Basic (`M5Stack-Core-ESP32`) select the **Minimal SPIFFS** partition scheme so the firmware fits while keeping OTA updates; the other boards work with the default partition. The official M5Stack store is here https://m5stack.com/products/basic-core-iot-development-kit. The current price is about 27.95 USD (9 February 2020). You can also buy it on Aliexpress https://www.aliexpress.com/item/M5Stack-Official-Stock-Offer-ESP32-Basic-Core-Development-Kit-Extensible-Micro-Control-Wifi-BLE-IoT-Prototype/32837164440.html or elsewhere.
 
 **You will need a microSD card.** It has to be formatted to FAT32 format and you have to put at least M5NS.INI file with configuration to the root of the microSD card. It is a good idea to put M5_NightscoutMon.jpg files to the SD card root too. You can replace M5_NightscoutMon.jpg with any 320x240 pixels picture if you want to customize your experience.
 
@@ -198,22 +199,13 @@ Another easier possibility is to download latest [M5Burner release](https://gith
 
 There is a Facebook group [M5STACK NIGHTSCOUT](https://www.facebook.com/groups/606295776549008/) where you can get support and installation guides in several languages prepared by members of the M5Stack Nightscout community. Please check the [Files section](https://www.facebook.com/groups/606295776549008/files/) first and search the group before asking questions. A lot of questions have been answered already. Big thanks to Patrick Sonnerat, Didier Frétigné, Peter Leimbach and more...
 
-### VSCode & Platform.IO Development
+### Firmware updates (OTA)
 
-* You can use VSCode & Platform.IO besides Arduino IDE for development.
-* For development use free [Visual Studio Code](https://code.visualstudio.com/)
-* Install Platform.IO addon in VSCode:
-  * open `Extensions` from left sidebar
-  * search for `Platform.IO` in extension search bar
-  * click green `Install` button and wait till it is installed
-* Unpack the M5_NightscoutMon_PlatformIO.zip to PlatformIO projects folder.
-* Copy the latest sources from GitHub root to PlatformIO project src folder (overwrite) and rename M5_NightscoutMon.ino to M5_NightscoutMon.cpp (the .zip dows not have to be updated to the latest version).
-* You can open project directly from VSCode `File -> Open folder...` menu, or from `PIO Home` with `Open project` button.
-* Project is already configured for Platform.IO & VSCode. During build it will download and configure all dependencies.
-* To **build** project press `PlatformIO: Build` button (it is white check mark icon `âś“` on the blue bottom toolbar)
-* To **upload** your project to the m5stack board:
-  * Connect your board via USB-C cable to your Laptop/PC
-  * press `PlatformIO: Upload` button (it is white right arrow icon `â†’` on the blue bottom toolbar)
+Once your M5Stack is set up and connected to Wi-Fi, you don't need a computer to keep it up to date. Open the device's web page (see [Setup](https://github.com/psonnera/M5_NightscoutMon/wiki/Setup#update-your-firmware) in the wiki) and, if a newer version is available, a **click to update** link appears. Click it and the device downloads and flashes the new firmware itself, then reboots.
+
+Firmware is served directly from this GitHub repository — the [`Binaries/`](Binaries) folder on `master` — over HTTPS; there is no separate update server. The device automatically requests the binary matching its own board (`Basic_4MB`, `ESP32_16MB` or `CoreS3`, see [`Scripts/README.md`](Scripts/README.md#the-three-firmwares)), so a Basic, Fire, Core2 or CoreS3 all get the correct image without any manual selection.
+
+If you maintain your own fork, see [`Scripts/README.md`](Scripts/README.md#publishing-an-ota-update) for how to build and publish updates for it.
 
 ### Donations
 

@@ -1,12 +1,10 @@
-#ifdef ARDUINO_M5STACK_Core2
-  #include <M5Core2.h>
-#else
-  #include <M5Stack.h>
-#endif
+#include <SD.h>          // must precede M5Unified.h so M5GFX enables its fs::FS (SD) image overloads
+#include <M5Unified.h>
 
 #include <Preferences.h>
 #include <WiFi.h>
 #include <WiFiMulti.h>
+#include <WiFiClientSecure.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <HTTPClient.h>
@@ -20,20 +18,30 @@
 #include "M5NSWebConfig.h"
 #include "externs.h"
 
-#ifdef ARDUINO_M5STACK_Core2
-  #define updateInfoURL "http://m5ns.goit.cz/update/core2/update.inf"
-  #define updateBinaryURL "http://m5ns.goit.cz/update/core2/M5_NightscoutMon.ino.bin"
-  #define updateNewsURL "http://m5ns.goit.cz/update/core2/whatsnew.txt"
+// OTA firmware is served straight from this repo (raw.githubusercontent.com, master
+// branch, Binaries/ folder). Variant selection mirrors the three images actually
+// produced by Scripts/build.ps1 (see Binaries/firmware.json): Basic_4MB (min_spiffs
+// partitions, 4MB flash), ESP32_16MB (default partitions, 16MB flash - covers Basic
+// 16MB, Fire and all Core2), and CoreS3 (ESP32-S3). Selection is by chip + flash size,
+// not board model, since a "basic-looking" board can have either partition layout.
+static const char* updateVariantPath() {
+#if CONFIG_IDF_TARGET_ESP32S3
+  return "CoreS3";
 #else
-  #define updateInfoURL "http://m5ns.goit.cz/update/basic/update.inf"
-  #define updateBinaryURL "http://m5ns.goit.cz/update/basic/M5_NightscoutMon.ino.bin"
-  #define updateNewsURL "http://m5ns.goit.cz/update/basic/whatsnew.txt"
+  return (ESP.getFlashChipSize() >= 16 * 1024 * 1024) ? "ESP32_16MB" : "Basic_4MB";
 #endif
+}
+static String updateURL(const char* file) {
+  return String("https://raw.githubusercontent.com/psonnera/M5_NightscoutMon/master/Binaries/")
+         + updateVariantPath() + "/" + file;
+}
 
 void handleRoot() {
   String webVer;
   String whatsNew;
   HTTPClient http;
+  WiFiClientSecure updateClient;
+  updateClient.setInsecure();
   IPAddress ip = WiFi.localIP();
   char tmpStr[64];
   char timeStr[20];
@@ -42,7 +50,7 @@ void handleRoot() {
   Serial.println("Serving root web page");
 
   if((WiFi.status() == WL_CONNECTED)) {
-    http.begin(updateInfoURL);
+    http.begin(updateClient, updateURL("update.inf"));
     http.setTimeout(5000);
     http.setConnectTimeout(5000);
     int httpCode = http.GET();
@@ -56,7 +64,7 @@ void handleRoot() {
       Serial.println("Error getting update.inf");
     }
     http.end();
-    http.begin(updateNewsURL);
+    http.begin(updateClient, updateURL("whatsnew.txt"));
     http.setTimeout(5000);
     http.setConnectTimeout(5000);
     httpCode = http.GET();
@@ -185,8 +193,7 @@ void handleRoot() {
   float sensSgvMgDl = 0;
   float sensSgv = 0;
   float last10sgv[10];
-  bool is_xDrip = 0;  
-  bool is_Sugarmate = 0;  
+  bool is_xDrip = 0;
   char iob_displayLine[16];
   char cob_displayLine[16];
   char delta_display[16];
@@ -336,7 +343,7 @@ void handleRoot() {
 
 void handleUpdate() {
   Serial.print("Updating firmware, please wait ... ");
-  M5.Lcd.setBrightness(100);
+  M5.Display.setBrightness(255);
   M5.Lcd.fillScreen(BLACK);
   M5.Lcd.setTextColor(WHITE);
   M5.Lcd.setCursor(0, 18);
@@ -364,9 +371,10 @@ void handleUpdate() {
 
   String webVer;
   HTTPClient http;
-  WiFiClient client;
+  WiFiClientSecure client;
+  client.setInsecure();
   if((WiFi.status() == WL_CONNECTED)) {
-    http.begin(updateInfoURL);
+    http.begin(client, updateURL("update.inf"));
     int httpCode = http.GET();
     if(httpCode > 0) {
       if(httpCode == HTTP_CODE_OK) {
@@ -391,7 +399,7 @@ void handleUpdate() {
     M5.Lcd.println("Updating the firmware... ");
     M5.Lcd.println();
     httpUpdate.rebootOnUpdate(false);
-    t_httpUpdate_return ret = httpUpdate.update(client, updateBinaryURL);
+    t_httpUpdate_return ret = httpUpdate.update(client, updateURL("M5_NightscoutMon.ino.bin"));
     //t_httpUpdate_return ret = httpUpdate.update(client, "server", 80, "file.bin");
 
     switch (ret) {
@@ -413,9 +421,7 @@ void handleUpdate() {
         M5.Lcd.println("UPDATED SUCCESSFULLY");
         M5.Lcd.println("Restarting ...");
 
-        #ifndef ARDUINO_M5STACK_Core2  // no .update() on M5Stack CORE2
-          M5.update();
-        #endif
+        M5.update();
         delay(1000);
         ESP.restart();
         break;
@@ -434,9 +440,7 @@ void handleUpdate() {
     M5.Lcd.println("NOTHING TO UPDATE");
   }
   if (!cfg.is_task_bootstrapping) {
-    #ifndef ARDUINO_M5STACK_Core2  // no .update() on M5Stack CORE2
-      M5.update();
-    #endif
+    M5.update();
     delay(2000);
     M5.Lcd.fillScreen(BLACK);
     draw_page();
@@ -833,7 +837,7 @@ void handleGetEditConfigItem() {
       if(lcdBrightness==cfg.brightness1) {
         // changing selected brightness, so update it
         lcdBrightness = String(w3srv.arg(i)).toInt();
-        M5.Lcd.setBrightness(lcdBrightness);
+        M5.Display.setBrightness(map(lcdBrightness, 0, 100, 0, 255));
       }
       cfg.brightness1 = String(w3srv.arg(i)).toInt();
     }
@@ -841,7 +845,7 @@ void handleGetEditConfigItem() {
       if(lcdBrightness==cfg.brightness2) {
         // changing selected brightness, so update it
         lcdBrightness = String(w3srv.arg(i)).toInt();
-        M5.Lcd.setBrightness(lcdBrightness);
+        M5.Display.setBrightness(map(lcdBrightness, 0, 100, 0, 255));
       }
       cfg.brightness2 = String(w3srv.arg(i)).toInt();
     }
@@ -849,7 +853,7 @@ void handleGetEditConfigItem() {
       if(lcdBrightness==cfg.brightness3) {
         // changing selected brightness, so update it
         lcdBrightness = String(w3srv.arg(i)).toInt();
-        M5.Lcd.setBrightness(lcdBrightness);
+        M5.Display.setBrightness(map(lcdBrightness, 0, 100, 0, 255));
       }
       cfg.brightness3 = String(w3srv.arg(i)).toInt();
     }
@@ -1058,9 +1062,7 @@ void handleSaveConfig() {
   
 
   if (cfg.is_task_bootstrapping) {
-    #ifndef ARDUINO_M5STACK_Core2  // no .update() on M5Stack CORE2
-      M5.update();
-    #endif
+    M5.update();
     WiFi.softAPdisconnect(true);
     delay(1000);
     ESP.restart();
