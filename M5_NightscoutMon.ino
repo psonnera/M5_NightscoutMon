@@ -68,7 +68,7 @@ SHT3X sht30;
 #include "microdot.h"
 MicroDot MD;
 
-String M5NSversion("2026071202");
+String M5NSversion("2026071203");
 
 #define VIBfreq 10000
 #define VIBchannel 14
@@ -622,20 +622,43 @@ void wifi_connect() {
   Serial.print("WiFi connected to SSID ");
   if (is_task_bootstrapping) {
     Serial.println(cfg.deviceName);
-    M5.Lcd.print("WiFi SSID: "); M5.Lcd.println(cfg.deviceName);
     Serial.print("SSID Passphrase: "); Serial.println(ssid_passphrase);
-    M5.Lcd.print("SSID Passphrase: "); M5.Lcd.println(ssid_passphrase);
-    M5.Lcd.println();
-    M5.Lcd.print("Join WiFi & Visit URL:\nhttp://");
+
+    // Two-column layout: text on the left, a big QR code on the right. Columns don't
+    // overlap horizontally, so text line count/spacing can't collide with the QR
+    // regardless of vertical position - a leftover cursor position from earlier boot
+    // messages was the cause of the old overlap, so start from a clean, fully-positioned
+    // screen instead of continuing whatever line the cursor was left on.
+    M5.Lcd.fillScreen(BLACK);
+    M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.setCursor(4, 4);
+    M5.Lcd.println("SSID:");
+    M5.Lcd.setCursor(4, 24);
+    M5.Lcd.println(cfg.deviceName);
+    M5.Lcd.setCursor(4, 48);
+    M5.Lcd.println("Password:");
+    M5.Lcd.setCursor(4, 68);
+    M5.Lcd.println(ssid_passphrase);
+
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setCursor(4, 96);
+    M5.Lcd.println("Or visit:");
+    M5.Lcd.setCursor(4, 110);
+    M5.Lcd.print("http://");
     M5.Lcd.print(cfg.deviceName);
-    M5.Lcd.print(".local\n");
-    M5.Lcd.print("IP address: ");
+    M5.Lcd.println(".local");
+    M5.Lcd.setCursor(4, 124);
     M5.Lcd.println(WiFi.softAPIP());
+
+    M5.Lcd.setCursor(165, 26);
+    M5.Lcd.println("Scan to join:");
 
     // Most phone camera apps recognize this format natively and offer to join with one tap.
     char wifiQR[96];
     snprintf(wifiQR, sizeof(wifiQR), "WIFI:S:%s;T:WPA;P:%s;;", cfg.deviceName, ssid_passphrase);
-    M5.Lcd.qrcode(wifiQR, M5.Lcd.width() - 104, M5.Lcd.height() - 104, 100, 3);
+    M5.Lcd.qrcode(wifiQR, 165, 45, 150, 3);
   } else {
     Serial.println(WiFi.SSID());
     M5.Lcd.print("WiFi SSID: "); M5.Lcd.println(WiFi.SSID());

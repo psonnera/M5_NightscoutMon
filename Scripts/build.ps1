@@ -70,9 +70,9 @@ $env:ARDUINO_DIRECTORIES_USER = 'C:/Users/patri/Documents/Arduino'
 # --- Target table -------------------------------------------------------------
 # Order matters for the interactive menu.
 $Targets = [ordered]@{
-    'Basic4MB'   = @{ Fqbn = 'esp32:esp32:m5stack-core-esp32:PartitionScheme=min_spiffs';           Folder = 'Basic_4MB';   Desc = 'old Basic <=2020.5, 4MB, no PSRAM  -> min_spiffs' }
-    'ESP32_16MB' = @{ Fqbn = 'esp32:esp32:m5stack-fire:PartitionScheme=default,PSRAM=disabled';      Folder = 'ESP32_16MB';  Desc = 'Basic 16MB, Fire, all Core2         -> default 16MB, PSRAM off' }
-    'CoreS3'     = @{ Fqbn = 'esp32:esp32:m5stack-cores3:PartitionScheme=default_16MB';              Folder = 'CoreS3';      Desc = 'all CoreS3 (ESP32-S3)              -> default_16MB' }
+    'Basic4MB'   = @{ Fqbn = 'esp32:esp32:m5stack-core-esp32:PartitionScheme=min_spiffs';           Folder = 'Basic_4MB';   Desc = 'old Basic <=2020.5' }
+    'ESP32_16MB' = @{ Fqbn = 'esp32:esp32:m5stack-fire:PartitionScheme=default,PSRAM=disabled';      Folder = 'ESP32_16MB';  Desc = 'Basic 16MB, Fire, all Core2' }
+    'CoreS3'     = @{ Fqbn = 'esp32:esp32:m5stack-cores3:PartitionScheme=default_16MB';              Folder = 'CoreS3';      Desc = 'all CoreS3 (ESP32-S3)' }
 }
 
 # Common flag: matches the PlatformIO fix for the missing gpio_deep_sleep_hold_dis
