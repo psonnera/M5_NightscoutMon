@@ -68,7 +68,7 @@ SHT3X sht30;
 #include "microdot.h"
 MicroDot MD;
 
-String M5NSversion("2026071101");
+String M5NSversion("2026071201");
 
 #define VIBfreq 10000
 #define VIBchannel 14

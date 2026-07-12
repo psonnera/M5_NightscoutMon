@@ -38,7 +38,10 @@ param(
     [ValidateSet('Basic4MB', 'ESP32_16MB', 'CoreS3', 'All')]
     [string]$Target,
 
-    [string]$ArduinoCli
+    [string]$ArduinoCli,
+
+    # Wipe each target's build folder before compiling (guaranteed-fresh build).
+    [switch]$Clean
 )
 
 $ErrorActionPreference = 'Stop'
@@ -108,11 +111,49 @@ if (-not $Target) {
 # --- Resolve selection to a list of target names ------------------------------
 $toBuild = if ($Target -eq 'All') { @($Targets.Keys) } else { @($Target) }
 
+# --- Auto-bump version on release ('All') builds ------------------------------
+# A full build of all three targets is treated as a release: bump the same-day
+# sequence number (or start a new day at 01) and write it back into the sketch
+# *before* compiling, so the binary, the on-device version display, and
+# update.inf all carry the new version. Single-target builds are test
+# iterations and never bump.
+if ($Target -eq 'All') {
+    if ($FirmwareVersion -notmatch '^(\d{8})(\d{2})$') {
+        throw "M5NSversion '$FirmwareVersion' is not in YYYYMMDDnn format; cannot auto-bump."
+    }
+    $today = Get-Date -Format 'yyyyMMdd'
+    if ($Matches[1] -eq $today) {
+        $seq = [int]$Matches[2] + 1
+        if ($seq -gt 99) {
+            throw "Already at sequence 99 for $today; cannot auto-bump further today."
+        }
+    } else {
+        $seq = 1
+    }
+    $NewVersion = '{0}{1:D2}' -f $today, $seq
+
+    Write-Host ("Bumping version: {0} -> {1}" -f $FirmwareVersion, $NewVersion) -ForegroundColor Yellow
+
+    $inoText = [IO.File]::ReadAllText($Sketch)
+    $inoText = $inoText -replace [regex]::Escape("M5NSversion(`"$FirmwareVersion`")"), "M5NSversion(`"$NewVersion`")"
+    [IO.File]::WriteAllText($Sketch, $inoText)
+
+    $FirmwareVersion = $NewVersion
+}
+
 # --- Build --------------------------------------------------------------------
+# Each target gets its own arduino-cli build-path: arduino-cli otherwise derives
+# one shared cache folder from the sketch path alone, so concurrent builds of
+# different targets clobbered each other's object files. (Concurrent builds of
+# the *same* target will still collide - don't launch build.ps1 twice for the
+# same -Target at once.)
+$BuildCacheRoot = Join-Path $env:LOCALAPPDATA 'arduino\builds\M5_NightscoutMon'
+
 $results = @()
 foreach ($name in $toBuild) {
-    $t       = $Targets[$name]
-    $outDir  = Join-Path (Join-Path $RepoRoot 'Binaries') $t.Folder
+    $t         = $Targets[$name]
+    $outDir    = Join-Path (Join-Path $RepoRoot 'Binaries') $t.Folder
+    $buildPath = Join-Path $BuildCacheRoot $name
 
     Write-Host ''
     Write-Host ("=== Building $name ===") -ForegroundColor Green
@@ -121,9 +162,15 @@ foreach ($name in $toBuild) {
 
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
-    & $ArduinoCli compile --clean `
+    if ($Clean -and (Test-Path $buildPath)) {
+        Remove-Item -Recurse -Force $buildPath
+    }
+    New-Item -ItemType Directory -Force -Path $buildPath | Out-Null
+
+    & $ArduinoCli compile `
         --fqbn $t.Fqbn `
         --build-property $ExtraFlags `
+        --build-path $buildPath `
         --output-dir $outDir `
         $Sketch
 
