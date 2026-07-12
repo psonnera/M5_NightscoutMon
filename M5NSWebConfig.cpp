@@ -426,6 +426,98 @@ void handleFwCheck() {
   w3srv.send(200, "text/html", message);
 }
 
+// ---- On-device OTA (no browser needed) ------------------------------------------
+// Used by the config page (page 4, M5_NightscoutMon.ino): draw_page() checks once on
+// page entry and caches the result, since draw_page() also re-runs every 15s from
+// loop() and can't afford a network fetch on every redraw. The middle button then
+// runs the update using the same WiFiClientSecure + httpUpdate path as handleUpdate()'s
+// web /update route below, just without any HTML.
+static String otaCachedVer = "";
+static bool   otaCacheValid = false;
+
+bool otaCheckLatest() {
+  otaCacheValid = false;
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  HTTPClient http;
+  WiFiClientSecure client;
+  client.setInsecure();
+  http.begin(client, updateURL("update.inf"));
+  http.setTimeout(5000);
+  http.setConnectTimeout(5000);
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    otaCachedVer = http.getString();
+    otaCachedVer.trim();
+    otaCacheValid = true;
+  }
+  http.end();
+  return otaUpdateAvailable();
+}
+
+bool otaUpdateAvailable() {
+  return otaCacheValid && (otaCachedVer > M5NSversion);
+}
+
+String otaLatestVersion() {
+  return otaCachedVer;
+}
+
+void otaRunUpdate() {
+  if (!otaUpdateAvailable()) return;
+
+  Serial.print("Updating firmware, please wait ... ");
+  M5.Display.setBrightness(255);
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setTextColor(WHITE);
+  M5.Lcd.setCursor(0, 18);
+  M5.Lcd.setTextSize(1);
+  M5.Lcd.setFreeFont(FMB9);
+  M5.Lcd.setTextDatum(TL_DATUM);
+  M5.Lcd.println("FIRMWARE UPDATE");
+  M5.Lcd.println();
+  M5.Lcd.print("Current firmware: "); M5.Lcd.println(M5NSversion);
+  M5.Lcd.print("New firmware: "); M5.Lcd.println(otaCachedVer);
+  M5.Lcd.println();
+  M5.Lcd.println("Updating the firmware... ");
+  M5.Lcd.println();
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  httpUpdate.rebootOnUpdate(false);
+  t_httpUpdate_return ret = httpUpdate.update(client, updateURL("M5_NightscoutMon.ino.bin"));
+
+  switch (ret) {
+    case HTTP_UPDATE_FAILED:
+      Serial.printf("HTTP_UPDATE_FAILED Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+      M5.Lcd.setTextColor(RED);
+      M5.Lcd.println("UPDATE FAILED");
+      delay(3000);
+      M5.Lcd.fillScreen(BLACK);
+      draw_page();
+      break;
+
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println("HTTP_UPDATE_NO_UPDATES");
+      M5.Lcd.setTextColor(YELLOW);
+      M5.Lcd.println("NO UPDATES");
+      delay(3000);
+      M5.Lcd.fillScreen(BLACK);
+      draw_page();
+      break;
+
+    case HTTP_UPDATE_OK:
+      Serial.println("HTTP_UPDATE_OK, restarting ...");
+      M5.Lcd.setTextColor(GREEN);
+      M5.Lcd.println("UPDATED SUCCESSFULLY");
+      M5.Lcd.println("Restarting ...");
+      M5.update();
+      delay(1000);
+      ESP.restart();
+      break;
+  }
+}
+
 void handleUpdate() {
   Serial.print("Updating firmware, please wait ... ");
   M5.Display.setBrightness(255);

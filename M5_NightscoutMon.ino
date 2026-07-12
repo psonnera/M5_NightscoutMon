@@ -152,6 +152,7 @@ int err_log_count = 0;
 int rcnt = 4;
 
 int dispPage = 0;
+int lastDrawnPage = -1; // lets draw_page() tell a fresh page entry from its own 15s periodic redraw
 #define PAGE_ERRLOG 3
 #define PAGE_WEBQR  4
 #define MAX_PAGE    PAGE_WEBQR
@@ -428,69 +429,81 @@ void buttons_test() {
   if(btnB_wasPressed) {
     // M5.Lcd.printf("B");
     Serial.printf("B");
-    /*
-    play_tone(440, 100, 1);
-    delay(10);
-    play_tone(880, 100, 1);
-    delay(10);
-    play_tone(1760, 100, 1);
-    */
-    struct tm timeinfo;
-    bool timeOK = getLocalTime(&timeinfo);
-    if( (millis()-lastButtonMillis)<2000 ) {
-      // snoozing just recently - will multiply snooze time
-      // Serial.printf("lastButton < 2s \r\n");
-      snoozeMult++;
-      if(snoozeMult>4)
-        snoozeMult = 0;
-    } else {
-      // Serial.printf("lastButton > 2s,  MULT = 1\r\n");
-      // new Snooze
-      snoozeMult = 1;
-    }
-    if(!timeOK){
-      // Serial.printf("Time not OK - NO SLEEP\r\n");
-      snoozeUntil = 0;
-    } else {
-      snoozeUntil = mktime(&timeinfo) + snoozeMult*cfg.snooze_timeout*60;
-      Serial.print("snoozeUntil = "); Serial.println(snoozeUntil);
-    }
 
-    M5.Lcd.fillRect(110, 220, 100, 20, TFT_WHITE);
-    M5.Lcd.setTextDatum(TL_DATUM);
-    M5.Lcd.setTextSize(1);
-    M5.Lcd.setFreeFont(FSSB12);
-    M5.Lcd.setTextColor(TFT_BLACK, TFT_WHITE);
-    char tmpStr[10];
-    int snoozeRemaining = 0;
-    if(timeOK) {
-      snoozeRemaining = difftime(snoozeUntil, mktime(&timeinfo));
-      if(snoozeRemaining<0)
-        snoozeRemaining = 0;
-    }
-    if(snoozeMult==0)
-      strcpy(tmpStr, "OFF");
-    else {
-      sprintf(tmpStr, "%i", (snoozeRemaining+59)/60);
-      if(cfg.LED_strip_mode==2) {
-        pixels.clear();
-        pixels.show();
-      }     
-    }
-    int txw=M5.Lcd.textWidth(tmpStr);
-    Serial.print("Set SNOOZE: "); Serial.print(tmpStr); Serial.print(", snoozeUntil-now = "); Serial.println(snoozeRemaining);
-    M5.Lcd.drawString(tmpStr, 159-txw/2, 220);
-    if(dispPage<maxPage) {
+    if(dispPage == PAGE_WEBQR) {
+      // Config page: middle button takes the update draw_page() found on page entry,
+      // instead of snoozing (which is meaningless on this page). Nothing to do if none
+      // is available - button meaning reverts to snooze the moment you leave the page,
+      // since it's derived from dispPage, not stored state.
+      if(otaUpdateAvailable())
+        otaRunUpdate();
+      M5.update();
+      waitBtnRelease();
+    } else {
+      /*
+      play_tone(440, 100, 1);
+      delay(10);
+      play_tone(880, 100, 1);
+      delay(10);
+      play_tone(1760, 100, 1);
+      */
+      struct tm timeinfo;
+      bool timeOK = getLocalTime(&timeinfo);
+      if( (millis()-lastButtonMillis)<2000 ) {
+        // snoozing just recently - will multiply snooze time
+        // Serial.printf("lastButton < 2s \r\n");
+        snoozeMult++;
+        if(snoozeMult>4)
+          snoozeMult = 0;
+      } else {
+        // Serial.printf("lastButton > 2s,  MULT = 1\r\n");
+        // new Snooze
+        snoozeMult = 1;
+      }
+      if(!timeOK){
+        // Serial.printf("Time not OK - NO SLEEP\r\n");
+        snoozeUntil = 0;
+      } else {
+        snoozeUntil = mktime(&timeinfo) + snoozeMult*cfg.snooze_timeout*60;
+        Serial.print("snoozeUntil = "); Serial.println(snoozeUntil);
+      }
+
+      M5.Lcd.fillRect(110, 220, 100, 20, TFT_WHITE);
+      M5.Lcd.setTextDatum(TL_DATUM);
+      M5.Lcd.setTextSize(1);
+      M5.Lcd.setFreeFont(FSSB12);
+      M5.Lcd.setTextColor(TFT_BLACK, TFT_WHITE);
+      char tmpStr[10];
+      int snoozeRemaining = 0;
+      if(timeOK) {
+        snoozeRemaining = difftime(snoozeUntil, mktime(&timeinfo));
+        if(snoozeRemaining<0)
+          snoozeRemaining = 0;
+      }
       if(snoozeMult==0)
-        M5.Lcd.fillRect(icon_xpos[1], icon_ypos[1], 16, 16, BLACK);
-      else
-        drawIcon(icon_xpos[1], icon_ypos[1], (uint8_t*)clock_icon16x16, TFT_RED);
+        strcpy(tmpStr, "OFF");
+      else {
+        sprintf(tmpStr, "%i", (snoozeRemaining+59)/60);
+        if(cfg.LED_strip_mode==2) {
+          pixels.clear();
+          pixels.show();
+        }
+      }
+      int txw=M5.Lcd.textWidth(tmpStr);
+      Serial.print("Set SNOOZE: "); Serial.print(tmpStr); Serial.print(", snoozeUntil-now = "); Serial.println(snoozeRemaining);
+      M5.Lcd.drawString(tmpStr, 159-txw/2, 220);
+      if(dispPage<maxPage) {
+        if(snoozeMult==0)
+          M5.Lcd.fillRect(icon_xpos[1], icon_ypos[1], 16, 16, BLACK);
+        else
+          drawIcon(icon_xpos[1], icon_ypos[1], (uint8_t*)clock_icon16x16, TFT_RED);
+      }
+      udpSendSnoozeRetries = UDP_SEND_RETRIES;
+      lastButtonMillis = millis();
+      M5.update();
+      waitBtnRelease();
     }
-    udpSendSnoozeRetries = UDP_SEND_RETRIES;
-    lastButtonMillis = millis();
-    M5.update();
-    waitBtnRelease();
-  } 
+  }
 
   if(btnC_wasPressed) {
     // M5.Lcd.printf("C");
@@ -1398,44 +1411,56 @@ void handleAlarmsInfoLine(struct NSinfo *ns) {
               }
               // draw info line
               char infoStr[64];
-              switch( cfg.info_line ) {
-                case 0: // sensor information
-                  strcpy(infoStr, ns->sensDev);
-                  if(strcmp(infoStr,"MIAOMIAO")==0) {
-                    if(ns->is_xDrip) {
-                      strcpy(infoStr,"xDrip MiaoMiao + Libre");
-                    } else {
-                      strcpy(infoStr,"Spike MiaoMiao + Libre");
+              if(dispPage >= PAGE_ERRLOG) {
+                // Log/config pages: loop/basal/sensor info is noise here (row was already
+                // cleared above). On the config page, show UPDATE over the middle button
+                // when otaCheckLatest() found a newer release - that's what BtnB now does
+                // on this page instead of snoozing.
+                if(dispPage == PAGE_WEBQR && otaUpdateAvailable()) {
+                  M5.Lcd.setTextColor(TFT_GREEN, TFT_BLACK);
+                  int stw = M5.Lcd.textWidth("UPDATE");
+                  M5.Lcd.drawString("UPDATE", 159-stw/2, 240);
+                }
+              } else {
+                switch( cfg.info_line ) {
+                  case 0: // sensor information
+                    strcpy(infoStr, ns->sensDev);
+                    if(strcmp(infoStr,"MIAOMIAO")==0) {
+                      if(ns->is_xDrip) {
+                        strcpy(infoStr,"xDrip MiaoMiao + Libre");
+                      } else {
+                        strcpy(infoStr,"Spike MiaoMiao + Libre");
+                      }
                     }
-                  }
-                  if(strcmp(infoStr,"Tomato")==0)
-                    strcat(infoStr," MiaoMiao + Libre");
-                  M5.Lcd.drawString(infoStr, 0, 240);
-                  break;
-                case 1: // button function icons
-                  // touch boards (Core2/CoreS3) centre icons over the 3 touch zones;
-                  // physical-button boards (Basic/Fire) align them under the 3 buttons
-                  if(M5.Touch.isEnabled()) {
-                    drawIcon(45, 220, (uint8_t*)sun_icon16x16, TFT_LIGHTGREY);
-                    drawIcon(150, 220, (uint8_t*)clock_icon16x16, TFT_LIGHTGREY);
-                    // drawIcon(153, 220, (uint8_t*)timer_icon16x16, TFT_LIGHTGREY);
-                    drawIcon(256, 220, (uint8_t*)door_icon16x16, TFT_LIGHTGREY);
-                  } else {
-                    drawIcon(58, 220, (uint8_t*)sun_icon16x16, TFT_LIGHTGREY);
-                    drawIcon(153, 220, (uint8_t*)clock_icon16x16, TFT_LIGHTGREY);
-                    // drawIcon(153, 220, (uint8_t*)timer_icon16x16, TFT_LIGHTGREY);
-                    drawIcon(246, 220, (uint8_t*)door_icon16x16, TFT_LIGHTGREY);
-                  }
-                  break;
-                case 2: // loop + basal information
-                case 3: // openaps + basal information
-                  strcpy(infoStr, "L: ");
-                  strlcat(infoStr, ns->loop_display_label, 64);
-                  M5.Lcd.drawString(infoStr, 0, 240);
-                  strcpy(infoStr, "B: ");
-                  strlcat(infoStr, ns->basal_display, 64);
-                  M5.Lcd.drawString(infoStr, 160, 240);
-                  break;
+                    if(strcmp(infoStr,"Tomato")==0)
+                      strcat(infoStr," MiaoMiao + Libre");
+                    M5.Lcd.drawString(infoStr, 0, 240);
+                    break;
+                  case 1: // button function icons
+                    // touch boards (Core2/CoreS3) centre icons over the 3 touch zones;
+                    // physical-button boards (Basic/Fire) align them under the 3 buttons
+                    if(M5.Touch.isEnabled()) {
+                      drawIcon(45, 220, (uint8_t*)sun_icon16x16, TFT_LIGHTGREY);
+                      drawIcon(150, 220, (uint8_t*)clock_icon16x16, TFT_LIGHTGREY);
+                      // drawIcon(153, 220, (uint8_t*)timer_icon16x16, TFT_LIGHTGREY);
+                      drawIcon(256, 220, (uint8_t*)door_icon16x16, TFT_LIGHTGREY);
+                    } else {
+                      drawIcon(58, 220, (uint8_t*)sun_icon16x16, TFT_LIGHTGREY);
+                      drawIcon(153, 220, (uint8_t*)clock_icon16x16, TFT_LIGHTGREY);
+                      // drawIcon(153, 220, (uint8_t*)timer_icon16x16, TFT_LIGHTGREY);
+                      drawIcon(246, 220, (uint8_t*)door_icon16x16, TFT_LIGHTGREY);
+                    }
+                    break;
+                  case 2: // loop + basal information
+                  case 3: // openaps + basal information
+                    strcpy(infoStr, "L: ");
+                    strlcat(infoStr, ns->loop_display_label, 64);
+                    M5.Lcd.drawString(infoStr, 0, 240);
+                    strcpy(infoStr, "B: ");
+                    strlcat(infoStr, ns->basal_display, 64);
+                    M5.Lcd.drawString(infoStr, 160, 240);
+                    break;
+                }
               }
             }
           }
@@ -1522,7 +1547,10 @@ void drawSegment(int x, int y, int r1, int r2, float a, int col)
 
 void draw_page() {
   char tmpstr[255];
-  
+
+  bool pageJustOpened = (dispPage != lastDrawnPage);
+  lastDrawnPage = dispPage;
+
   M5.Lcd.setTextDatum(TL_DATUM);
   M5.Lcd.setTextColor(WHITE, BLACK);
   M5.Lcd.setTextSize(1);
@@ -2208,6 +2236,13 @@ void draw_page() {
         M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
         M5.Lcd.drawString(url, 160, 198);
       }
+
+      // Only check on page entry, not on the 15s periodic redraw - this is a blocking
+      // GitHub fetch (up to ~5s). Page paints first, then the UPDATE label (if any)
+      // appears once the fetch returns. otaCheckLatest() itself is a no-op without WiFi,
+      // and is independent of the internal web server, so no need to gate on "msg" here.
+      if(pageJustOpened)
+        otaCheckLatest();
 
       handleAlarmsInfoLine(&ns);
       drawBatteryStatus(icon_xpos[2], icon_ypos[2]);

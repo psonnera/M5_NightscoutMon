@@ -10,6 +10,12 @@ extern MicroDot MD;
 void handleRoot();
 void handleFwCheck();
 void handleUpdate();
+
+// On-device OTA (no browser needed) - used by the config page's middle-button update.
+bool otaCheckLatest();
+bool otaUpdateAvailable();
+String otaLatestVersion();
+void otaRunUpdate();
 void handleSwitchConfig();
 void handleEditConfigItem();
 void handleGetEditConfigItem();

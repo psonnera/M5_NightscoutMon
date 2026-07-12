@@ -160,7 +160,9 @@ Bottom info line is the same as on page 0.
 Displays last 10 record errors and total number of errors record since last restart. Occasional communication errors, such as "timeout" or "connection refused" are normal and happen sometimes due to WiFi and internet connection and Nightscout site status. If you have a lot of errors every few minutes, consider to move your M5Stack to a different place or extend WiFi signal.  
 
 **Web config QR code page**
-Shows a QR code encoding the device's local IP address (`http://a.b.c.d`). Scan it with a phone camera to open the device's web configuration page directly, without needing to type in an address or rely on `<name>.local` (which doesn't work reliably if several M5NS devices are on the same network). If WiFi is disconnected or the internal web server is disabled in M5NS.INI, the page shows a message instead of the QR code.
+Shows a QR code encoding the device's local IP address (`http://a.b.c.d`). Scan it with a phone camera to open the device's web configuration page directly, without needing to type in an address or rely on `<name>.local` (which doesn't work reliably if several M5NS devices are on the same network). If WiFi is disconnected or the internal web server is disabled in M5NS.INI, the page shows a message instead of the QR code. On entry the device checks GitHub for a newer firmware release; if one is available, the bottom row shows **UPDATE** and the middle button installs it directly from the device, with no browser needed.
+
+Neither the Error Log page nor this page show the loop/basal status row (`L: ... B: ...`) that appears on the other pages - it isn't relevant here, and on this page the middle button has a different job.
 <br/>
 
 ### Buttons
@@ -168,6 +170,8 @@ Shows a QR code encoding the device's local IP address (`http://a.b.c.d`). Scan 
 The **left button** changes the backlight in the 3 steps defined in M5NS.INI file.
 
 The **middle button** snoozes M5Stack for defined time to prevent alarm or warning sound. You can "snooze" it even before the alarm is activated. Snooze active is indicated by red clock icon in status icon area. You can press "snooze" more times to make snooze time longer. It cycles 1x - 2x - 3x - 4x - OFF and again. You have 2s to press button again, otherwise it starts from 1x. The "snooze" function is distributed to all devices in your local network with the same Nightscout user (Nightscout URL).
+
+On the **web config QR code page** only, the middle button does not snooze - it installs a firmware update if one is shown as available (see above), and does nothing otherwise. It goes back to snoozing as soon as you switch to any other page.
 
 Short press of the **right button** switches display pages. Long press (4 seconds) puts M5Stack to the sleep as it is a little bit tricky to double click standard red power button.  
 <br/>

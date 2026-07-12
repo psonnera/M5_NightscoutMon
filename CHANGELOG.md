@@ -3,6 +3,14 @@
 ## Revisions
 
 
+### 12 July 2026 (web config page rework, on-device OTA button)
+
+* Reworked the web config page: settings are now grouped into collapsible sections instead of one long flat list, Yes/No settings are tap-to-toggle switches, two-value settings are side-by-side buttons, and only the section you just changed stays expanded (previously every change collapsed the whole page back to the top).
+* The firmware version/update check no longer runs on every page load (it used to block the whole page on a GitHub fetch); it's now a separate "Check for update" link.
+* Disabling the internal web server now shows a confirmation first, since doing so from the page removes the page itself. The change also can't actually be applied that way any more (the page becomes unreachable before the Save button can be clicked, so a restart reverts it) - the confirmation explains this and points to setting `disable_web_server = 1` in `M5NS.INI` instead. Separately, bootstrap/setup mode now always serves the config page regardless of this setting, fixing setup mode being silently unreachable for anyone who did set it in the INI.
+* The Error Log and web config QR pages no longer show the `L: ... B: ...` loop/basal status row - it isn't relevant on either page.
+* The web config QR page now checks GitHub for a newer firmware release when opened and shows **UPDATE** on the bottom row if one exists; the middle button (snooze everywhere else) installs it directly from the device when on this page, no browser required.
+
 ### 12 July 2026 (QR code pairing + web config page)
 
 * Added a QR code to the SoftAP setup screen so a phone can join the device's Wi-Fi with one tap instead of typing the generated passphrase (`WIFI:S:...;T:WPA;P:...;;` format, recognized natively by iOS/Android camera apps).
