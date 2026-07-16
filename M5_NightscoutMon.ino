@@ -68,7 +68,7 @@ SHT3X sht30;
 #include "microdot.h"
 MicroDot MD;
 
-String M5NSversion("2026071401");
+String M5NSversion("2026071601");
 
 #define VIBfreq 10000
 #define VIBchannel 14
@@ -600,6 +600,7 @@ void wifi_connect() {
     dnsServer.start(DNS_PORT, "*", ip);    
   } else {
     WiFi.mode(WIFI_STA);
+    WiFi.setHostname(cfg.deviceName);
     WiFi.disconnect();
     delay(100);
 

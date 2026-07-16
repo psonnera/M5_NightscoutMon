@@ -98,5 +98,6 @@ struct NSinfo {
 void readConfigFromFlash(tConfig *cfg);
 void saveConfigToFlash(tConfig *cfg);
 void readConfiguration(const char *iniFilename, tConfig *cfg);
+void applyDefaultDeviceName(tConfig *cfg);
 
 #endif

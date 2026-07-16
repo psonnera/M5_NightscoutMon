@@ -3,6 +3,11 @@
 ## Revisions
 
 
+### 16 July 2026 (unique per-device name)
+
+* The device name (`deviceName`, previously always the fixed `M5NS`) now defaults to a per-device `M5NS-XXXX`, where `XXXX` is derived from the last two bytes of the device's ESP32 eFuse MAC address. This makes the mDNS name (`m5ns-xxxx.local`), SoftAP SSID, Wi-Fi join QR code, and DHCP hostname unique, so `<name>.local` no longer ambiguously resolves to whichever of several devices on the same network answers first. A `device_name` that is empty, or still the legacy fixed `M5NS`/`m5ns`, is treated as unset and replaced by the derived default; a name you've customized in the config UI or `M5NS.INI` is left untouched. The Android M5StackLoader app derives the identical name independently from the same eFuse bytes and writes it into the device's NVS during flashing, so even a device with older firmware picks up its unique name once reflashed with a current app build.
+* Also sets the DHCP client hostname (`WiFi.setHostname`) to match, so the device shows up under its unique name in the router's client list too - previously the DHCP hostname was left at the ESP32 core's generic default.
+
 ### 12 July 2026 (web config page rework, on-device OTA button)
 
 * Reworked the web config page: settings are now grouped into collapsible sections instead of one long flat list, Yes/No settings are tap-to-toggle switches, two-value settings are side-by-side buttons, and only the section you just changed stays expanded (previously every change collapsed the whole page back to the top).

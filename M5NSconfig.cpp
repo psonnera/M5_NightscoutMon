@@ -1,6 +1,25 @@
 #include "M5NSconfig.h"
 #include <Preferences.h>
 
+/*
+ * Derives a unique device name "M5NS-XXXX" from the last two bytes of the ESP32's
+ * factory eFuse MAC address, so multiple devices on one network get distinct mDNS
+ * names / SoftAP SSIDs instead of colliding on the fixed "M5NS". Only replaces
+ * deviceName when it is empty or still the legacy fixed "M5NS" default, so a name
+ * the user customized is left alone.
+ *
+ * The Android M5StackLoader app (esp/DeviceName.kt) derives this exact same suffix
+ * independently from the same eFuse bytes read over the esptool serial protocol, so
+ * both sides agree on the name without any communication between them.
+ */
+void applyDefaultDeviceName(tConfig *cfg) {
+  if (strlen(cfg->deviceName) != 0 && strcasecmp(cfg->deviceName, "M5NS") != 0)
+    return;
+  uint64_t mac = ESP.getEfuseMac();
+  snprintf(cfg->deviceName, sizeof(cfg->deviceName), "M5NS-%02X%02X",
+           (uint8_t)(mac >> 32), (uint8_t)(mac >> 40));
+}
+
 void printErrorMessage(uint8_t e, bool eol = true)
 {
   switch (e) {
@@ -46,6 +65,7 @@ void readConfigFromFlash(tConfig *cfg) {
     Serial.println("Error opening Preferences M5NSconfig");
     M5.Lcd.println("No config in flash");
     Serial.println("No configuration found in Preferences");
+    applyDefaultDeviceName(cfg);
   } else {
     Serial.println("Reading configuration from Preferences M5NSconfig");
     prefs.getString("nightscout", cfg->url, 128);
@@ -55,8 +75,7 @@ void readConfigFromFlash(tConfig *cfg) {
     if(strlen(cfg->userName)==0)
       strcpy(cfg->userName, " ");
     prefs.getString("device_name", cfg->deviceName, 32);
-    if(strlen(cfg->deviceName)==0)
-      strcpy(cfg->deviceName, "M5NS");
+    applyDefaultDeviceName(cfg);
     cfg->timeZone = prefs.getInt("time_zone", 3600);
     cfg->dst = prefs.getInt("dst", 0);
     cfg->show_mgdl = prefs.getInt("show_mgdl", 0);
@@ -309,10 +328,11 @@ void readConfiguration(const char *iniFilename, tConfig *cfg) {
     strlcpy(cfg->deviceName, buffer, 32);
   }
   else {
-    Serial.println("NO device name defined, default M5NS");
-    strcpy(cfg->deviceName, "M5NS");
+    Serial.println("NO device name defined, default M5NS-XXXX");
+    cfg->deviceName[0] = 0;
   }
-  
+  applyDefaultDeviceName(cfg);
+
   if (ini.getValue("config", "time_zone", buffer, bufferLen)) {
     Serial.print("time_zone = ");
     cfg->timeZone = atoi(buffer);
