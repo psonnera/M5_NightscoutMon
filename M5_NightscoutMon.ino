@@ -68,7 +68,7 @@ SHT3X sht30;
 #include "microdot.h"
 MicroDot MD;
 
-String M5NSversion("2026071601");
+String M5NSversion("2026071602");
 
 #define VIBfreq 10000
 #define VIBchannel 14
@@ -2209,6 +2209,7 @@ void draw_page() {
     case PAGE_WEBQR: {
       // QR code to the device's web config page - scan with a phone camera to open it directly
       char url[40];
+      char hostLine[48];
       const char *msg = NULL;
       IPAddress ip = WiFi.localIP();
 
@@ -2216,26 +2217,39 @@ void draw_page() {
         msg = "Web server off";
       else if((WiFi.status()!=WL_CONNECTED) || ((uint32_t)ip == 0))
         msg = "No WiFi";
-      else
+      else {
         snprintf(url, sizeof(url), "http://%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+        if(mDNSactive)
+          snprintf(hostLine, sizeof(hostLine), "%u.%u.%u.%u=%s.local", ip[0], ip[1], ip[2], ip[3], cfg.deviceName);
+        else
+          strncpy(hostLine, url, sizeof(hostLine));
+      }
 
       M5.Lcd.fillRect(0, 0, 264, 18, TFT_BLACK);
       M5.Lcd.setFreeFont(FMB9);
       M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
       M5.Lcd.drawString("Scan to open config", 0, 0);
 
+      // second header row: hostname/IP shown above the QR too, not just below it
+      M5.Lcd.fillRect(0, 18, 320, 18, TFT_BLACK);
+      M5.Lcd.setFreeFont(FSS9);
+      M5.Lcd.setTextDatum(TC_DATUM);
+      M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+      M5.Lcd.drawString(msg ? "" : hostLine, 160, 18);
+
       // opaque white card is self-covering, so this redraws flicker-free every 15s
-      M5.Lcd.fillRect(72, 20, 176, 176, TFT_WHITE);
-      M5.Lcd.fillRect(0, 198, 320, 20, TFT_BLACK);
+      // (border shrunk from 16px to 8px to make room for the row above)
+      M5.Lcd.fillRect(80, 36, 160, 160, TFT_WHITE);
+      M5.Lcd.fillRect(0, 196, 320, 20, TFT_BLACK);
       if(msg) {
         M5.Lcd.setTextDatum(MC_DATUM);
         M5.Lcd.setTextColor(TFT_BLACK, TFT_WHITE);
-        M5.Lcd.drawString(msg, 160, 108);
+        M5.Lcd.drawString(msg, 160, 116);
       } else {
-        M5.Lcd.qrcode(url, 88, 36, 144, 1);
+        M5.Lcd.qrcode(url, 88, 44, 144, 1);
         M5.Lcd.setTextDatum(TC_DATUM);
         M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-        M5.Lcd.drawString(url, 160, 198);
+        M5.Lcd.drawString(url, 160, 196);
       }
 
       // Only check on page entry, not on the 15s periodic redraw - this is a blocking
