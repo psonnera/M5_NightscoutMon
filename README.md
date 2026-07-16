@@ -8,7 +8,7 @@
 ###### This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 ###### This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
 ###### You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>. 
-###### This software uses some 3rd party libraries:<br/>IniFile by Steve Marple (GNU LGPL v2.1)<br/>ArduinoJson by Benoit BLANCHON (MIT License)<br/>IoT Icon Set by Artur Funk (GPL v3)<br/>DHT12 by Bobadas (Public domain)<br/><br/>Additions to the code:<br/>Peter Leimbach (Nightscout token)<br/>Sulka Haro (Nightscout API queries help)<br/>Dominik Dzienia _(Refactoring, migration to Platform.IO)_
+###### This software uses some 3rd party libraries:<br/>IniFile by Steve Marple (GNU LGPL v2.1)<br/>ArduinoJson by Benoit BLANCHON (MIT License)<br/>IoT Icon Set by Artur Funk (GPL v3)<br/>DHT12 by Bobadas (Public domain)<br/><br/>Additions to the code:<br/>Peter Leimbach (Nightscout token)<br/>Sulka Haro (Nightscout API queries help)<br/>Dominik Dzienia _(Refactoring, migration to Platform.IO)_<br/></br>Patrick Sonnerat and Claude (M5Unified and QR codes)
 
 ### Contents
 [What is this good for?](#m5stack-nightscout-monitor-1)  
@@ -50,8 +50,12 @@ token = security token              ; token for access secured Nightscout site,
                                     ; if public Nightscout site is used, delete token line and do not use it
 bootpic = /M5_NightscoutMon.jpg     ; boot picture
 name = YourName                     ; display name
-device_name = M5NS                  ; device name for mDNS, that can be used to  access the device from local
-                                    ; intranet, use .local domain, eg. m5ns.local
+device_name = M5NS                  ; device name for mDNS, that can be used to access the device from local
+                                    ; intranet, use .local domain. Can be omitted or left as the default M5NS:
+                                    ; the device then picks its own name unique to it, M5NS-XXXX (XXXX derived
+                                    ; from its MAC address), eg. m5ns-a1b2.local - this way several devices on
+                                    ; the same network never collide on the same .local address. Set this key
+                                    ; to anything else to pick your own fixed name instead.
 disable_web_server = 0              ; To disable internal Web server enter 'disable_web_server = 1'
 time_zone = 3600                    ; the time zone where you live in seconds (3600 is GMT+1, Prague)
 dst = 3600                          ; your daylight saving time offset (3600s is +1 hour)
@@ -216,8 +220,10 @@ If you maintain your own fork, see [`Scripts/README.md`](Scripts/README.md#publi
 
 ### Donations
 
-If you find my project useful, I will appreciate if you donate me few bucks for further development or buy me a glass of beer or wine :wine_glass:.
+Donations support the project's original author and maintainer, **Martin Lukasek**. If you find this project useful, he will appreciate if you donate him few bucks for further development or buy him a glass of beer or wine :wine_glass:.
 
 https://paypal.me/8bity
 
-I also collect and repair vintage [8-bit computers](http://www.8bity.cz/), so if you have some really old computer, I could give it a new home and care :smile:. Thank you!
+He also collects and repairs vintage [8-bit computers](http://www.8bity.cz/), so if you have some really old computer, he could give it a new home and care :smile:. Thank you!
+
+Don't forget you can also donate to the [Nightscout Foundation](https://www.nightscoutfoundation.org/donate).
