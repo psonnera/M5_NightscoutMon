@@ -16,6 +16,7 @@
 #include "IniFile.h"
 #include "M5NSconfig.h"
 #include "M5NSWebConfig.h"
+#include "M5NSDexcom.h"
 #include "externs.h"
 
 // OTA firmware is served straight from this repo (raw.githubusercontent.com, master
@@ -161,7 +162,7 @@ void handleRoot() {
   int mult = cfg.show_mgdl?18:1;
 
   String message;
-  message.reserve(10240);
+  message.reserve(11264);
   pageHeadOpen(message, NULL);
 
   message += "<a class=\"btn\" href=\"/savecfg\">Save configuration to M5NS.INI</a>\r\n";
@@ -240,6 +241,21 @@ void handleRoot() {
   rowEdit(message, "User name", cfg.userName, "userName", "ns");
   rowSeg(message, "Display units", cfg.show_mgdl, "show_mgdl", "ns", "mg/dL", "mmol/L");
   rowToggle(message, "Filter only SGV values", cfg.sgv_only, "sgv_only", "ns");
+  message += "</details>\r\n";
+
+  // ---- Data source ----
+  detailsOpen(message, "dx", "Data source", sec);
+  {
+    const char* dsOpts[2] = {"Nightscout", "Dexcom Share"}; // add "LibreLinkUp" once data_source=2 is implemented
+    const int dsVals[2] = {0, 1};
+    rowSelect(message, "Source", "data_source", "dx", dsOpts, dsVals, 2, cfg.data_source);
+  }
+  rowEdit(message, "Dexcom account", strlen(cfg.dexcom_user) > 0 ? String(cfg.dexcom_user) : String("(not set)"), "dexcom", "dx");
+  {
+    const char* srvOpts[3] = {"US (share1.dexcom.com)", "Outside US (shareous1.dexcom.com)", "Japan (share.dexcom.jp)"};
+    const int srvVals[3] = {0, 1, 2};
+    rowSelect(message, "Dexcom server", "dexcom_server", "dx", srvOpts, srvVals, 3, cfg.dexcom_server);
+  }
   message += "</details>\r\n";
 
   // ---- Display ----
@@ -664,7 +680,28 @@ void handleSwitchConfig() {
   for (uint8_t i = 0; i < w3srv.args(); i++) {
     if(String(w3srv.argName(i)).equals("param")) {
       String param = w3srv.arg(i);
-      if(param.equals("show_mgdl")) {
+      if(param.equals("data_source")) {
+        if(haveVal && val>=0 && val<=1) // bump to <=2 once LibreLinkUp is implemented
+          cfg.data_source = val;
+        else {
+          cfg.data_source++;
+          if(cfg.data_source > 1)
+            cfg.data_source = 0;
+        }
+        dexcomResetSession();
+        ns.sensTime = 0; // force an immediate refetch from the newly selected source
+      }
+      else if(param.equals("dexcom_server")) {
+        if(haveVal && val>=0 && val<=2)
+          cfg.dexcom_server = val;
+        else {
+          cfg.dexcom_server++;
+          if(cfg.dexcom_server > 2)
+            cfg.dexcom_server = 0;
+        }
+        dexcomResetSession();
+      }
+      else if(param.equals("show_mgdl")) {
         if(haveVal) cfg.show_mgdl = (val!=0);
         else cfg.show_mgdl = !cfg.show_mgdl;
       }
@@ -835,6 +872,10 @@ void handleEditConfigItem() {
       editRow(message, "Nightscout URL", "<input type=\"text\" name=\"url\" value=\"" + String(cfg.url) + "\" size=\"28\" maxlength=\"128\">", "e.g. sitename.herokuapp.com");
       editRow(message, "Security token", "<input type=\"text\" name=\"token\" value=\"" + String(cfg.token) + "\" size=\"28\" maxlength=\"64\">", "empty if not used");
     }
+    if(String(w3srv.arg(0)).equals("dexcom")) {
+      editRow(message, "Dexcom account", "<input type=\"text\" name=\"dexcom_user\" value=\"" + String(cfg.dexcom_user) + "\" size=\"28\" maxlength=\"63\">", "use the account that SHARES glucose data, not a follower account");
+      editRow(message, "Dexcom password", "<input type=\"password\" name=\"dexcom_pass\" value=\"" + String(cfg.dexcom_pass) + "\" size=\"28\" maxlength=\"63\">", "stored on the device SD card / flash in plain text");
+    }
     if(String(w3srv.arg(0)).equals("deviceName")) {
       editRow(message, "Device name", "<input type=\"text\" name=\"deviceName\" value=\"" + String(cfg.deviceName) + "\" size=\"12\" maxlength=\"32\">.local");
       message += "<p class=\"warn\">Applied after Save - the device will restart automatically.</p>\r\n";
@@ -946,6 +987,14 @@ void handleGetEditConfigItem() {
     }
     if(String(w3srv.argName(i)).equals("token")) {
       strncpy(cfg.token, String(w3srv.arg(i)).c_str(), 64);
+    }
+    if(String(w3srv.argName(i)).equals("dexcom_user")) {
+      strncpy(cfg.dexcom_user, String(w3srv.arg(i)).c_str(), 64);
+      dexcomResetSession();
+    }
+    if(String(w3srv.argName(i)).equals("dexcom_pass")) {
+      strncpy(cfg.dexcom_pass, String(w3srv.arg(i)).c_str(), 64);
+      dexcomResetSession();
     }
     if(String(w3srv.argName(i)).equals("deviceName")) {
       String newVal = String(w3srv.arg(i));
@@ -1159,6 +1208,10 @@ static void persistConfigToDisk() {
     dstFil.print("[config]\r\n");
     dstFil.print("nightscout = "); dstFil.print(cfg.url); dstFil.print("\r\n");
     dstFil.print("token = "); dstFil.print(cfg.token); dstFil.print("\r\n");
+    dstFil.print("data_source = "); dstFil.print(cfg.data_source); dstFil.print("\r\n");
+    dstFil.print("dexcom_user = "); dstFil.print(cfg.dexcom_user); dstFil.print("\r\n");
+    dstFil.print("dexcom_pass = "); dstFil.print(cfg.dexcom_pass); dstFil.print("\r\n");
+    dstFil.print("dexcom_server = "); dstFil.print(cfg.dexcom_server); dstFil.print("\r\n");
     dstFil.print("bootpic = "); dstFil.print(cfg.bootPic); dstFil.print("\r\n");
     dstFil.print("name = "); dstFil.print(cfg.userName); dstFil.print("\r\n");
     dstFil.print("device_name = "); dstFil.print(cfg.deviceName); dstFil.print("\r\n");

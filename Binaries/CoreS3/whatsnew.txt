@@ -1,2 +1,1 @@
-New display page with a QR code to open the web config from your phone.
-SoftAP setup screen now shows a QR code to join the device's Wi-Fi.
+Added Dexcom Share ("Follow") as an alternative glucose data source - see the new "Data source" section in the web config page.

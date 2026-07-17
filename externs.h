@@ -5,6 +5,8 @@
 #include <WebServer.h>
 #include "M5NSconfig.h"
 #include <WiFiMulti.h>
+#define ARDUINOJSON_USE_LONG_LONG 1
+#include <ArduinoJson.h>
 
 extern WebServer w3srv;
 extern tConfig cfg;
@@ -18,5 +20,7 @@ extern int dispPage;
 extern int maxPage;
 extern void setPageIconPos(int page);
 extern uint8_t lcdBrightness;
+extern DynamicJsonDocument JSONdoc;
+extern void addErrorLog(int code);
 
 #endif

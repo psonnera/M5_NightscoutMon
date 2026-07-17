@@ -8,6 +8,10 @@
 struct tConfig {
   char url[128];
   char token[64]; // security token
+  int data_source = 0; // 0 = Nightscout (default), 1 = Dexcom Share, 2 = LibreLinkUp (reserved, not yet implemented)
+  char dexcom_user[64];
+  char dexcom_pass[64]; // stored in plain text, same as token/wlanpass
+  int dexcom_server = 0; // 0 = US (share1.dexcom.com), 1 = outside US (shareous1.dexcom.com), 2 = Japan (share.dexcom.jp)
   char bootPic[64];
   char userName[32];
   char deviceName[32];

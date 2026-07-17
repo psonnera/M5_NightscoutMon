@@ -57,6 +57,7 @@ Adafruit_NeoPixel pixels(10, 15, NEO_GRB + NEO_KHZ800);
 #include "IniFile.h"
 #include "M5NSconfig.h"
 #include "M5NSWebConfig.h"
+#include "M5NSDexcom.h"
 
 #include <Wire.h>     //The DHT12 uses I2C comunication.
 #include "DHT12.h"
@@ -68,7 +69,7 @@ SHT3X sht30;
 #include "microdot.h"
 MicroDot MD;
 
-String M5NSversion("2026071602");
+String M5NSversion("2026071702");
 
 #define VIBfreq 10000
 #define VIBchannel 14
@@ -792,6 +793,17 @@ void drawMiniGraph(struct NSinfo *ns){
   Serial.println();
 }
 
+// Dispatches to the active glucose data source, selected by cfg.data_source.
+int readDataSource() {
+  switch(cfg.data_source) {
+    case 1:
+      return readDexcom(&cfg, &ns);
+    // case 2: return readLibre(&cfg, &ns); // LibreLinkUp, reserved for a future data source
+    default:
+      return readNightscout(cfg.url, cfg.token, &ns);
+  }
+}
+
 int readNightscout(char *url, char *token, struct NSinfo *ns) {
   HTTPClient http;
   WiFiClientSecure sclient;
@@ -968,34 +980,8 @@ int readNightscout(char *url, char *token, struct NSinfo *ns) {
           
           localtime_r(&ns->sensTime, &ns->sensTm);
           
-          ns->arrowAngle = 180;
-          if(strcmp(ns->sensDir,"DoubleDown")==0 || strcmp(ns->sensDir,"DOUBLE_DOWN")==0)
-            ns->arrowAngle = 90;
-          else 
-            if(strcmp(ns->sensDir,"SingleDown")==0 || strcmp(ns->sensDir,"SINGLE_DOWN")==0)
-              ns->arrowAngle = 75;
-            else 
-                if(strcmp(ns->sensDir,"FortyFiveDown")==0 || strcmp(ns->sensDir,"FORTY_FIVE_DOWN")==0)
-                  ns->arrowAngle = 45;
-                else 
-                    if(strcmp(ns->sensDir,"Flat")==0 || strcmp(ns->sensDir,"FLAT")==0)
-                      ns->arrowAngle = 0;
-                    else 
-                        if(strcmp(ns->sensDir,"FortyFiveUp")==0 || strcmp(ns->sensDir,"FORTY_FIVE_UP")==0)
-                          ns->arrowAngle = -45;
-                        else 
-                            if(strcmp(ns->sensDir,"SingleUp")==0 || strcmp(ns->sensDir,"SINGLE_UP")==0)
-                              ns->arrowAngle = -75;
-                            else 
-                                if(strcmp(ns->sensDir,"DoubleUp")==0 || strcmp(ns->sensDir,"DOUBLE_UP")==0)
-                                  ns->arrowAngle = -90;
-                                else 
-                                    if(strcmp(ns->sensDir,"NONE")==0)
-                                      ns->arrowAngle = 180;
-                                    else 
-                                        if(strcmp(ns->sensDir,"NOT COMPUTABLE")==0)
-                                          ns->arrowAngle = 180;
-                                          
+          ns->arrowAngle = directionToArrowAngle(ns->sensDir);
+
           Serial.print("sensDev = ");
           Serial.println(ns->sensDev);
           Serial.print("sensTime = ");
@@ -2169,7 +2155,16 @@ void draw_page() {
               case 1003:
                 strcpy(tmpStr, "JSON2 parsing failed");
                 break;
-              default:              
+              case 1004:
+                strcpy(tmpStr, "No data from Dexcom");
+                break;
+              case 1101:
+                strcpy(tmpStr, "Dexcom communication error");
+                break;
+              case 1102:
+                strcpy(tmpStr, "Dexcom bad credentials");
+                break;
+              default:
                 sprintf(tmpStr, "HTTP error %d", err_log[i].err_code);
             }
           }
@@ -2542,7 +2537,7 @@ void loop() {
       */
       if((sensorDifSec>305) && (rcnt>3)) {
         rcnt = 0;
-        readNightscout(cfg.url, cfg.token, &ns);
+        readDataSource();
         if(rcnt==4) {
           M5.Lcd.fillScreen(BLACK);
           M5.Lcd.setTextColor(WHITE);
