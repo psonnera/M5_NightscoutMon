@@ -235,31 +235,33 @@ void handleRoot() {
   rowText(message, "Last sensor direction", ns.sensDir);
   message += "</details>\r\n";
 
-  // ---- Nightscout ----
-  detailsOpen(message, "ns", "Nightscout", sec);
-  rowEdit(message, "Nightscout URL", "<a href=\"" + String(NSurl) + "\">" + String(NSurl) + "</a>", "NSurl", "ns");
-  rowEdit(message, "User name", cfg.userName, "userName", "ns");
-  rowSeg(message, "Display units", cfg.show_mgdl, "show_mgdl", "ns", "mg/dL", "mmol/L");
-  rowToggle(message, "Filter only SGV values", cfg.sgv_only, "sgv_only", "ns");
-  message += "</details>\r\n";
-
   // ---- Data source ----
+  // Exactly one source is ever active (see readDataSource() in the .ino) - only the
+  // fields relevant to the selected source are shown here, the rest stay hidden.
   detailsOpen(message, "dx", "Data source", sec);
   {
     const char* dsOpts[2] = {"Nightscout", "Dexcom Share"}; // add "LibreLinkUp" once data_source=2 is implemented
     const int dsVals[2] = {0, 1};
     rowSelect(message, "Source", "data_source", "dx", dsOpts, dsVals, 2, cfg.data_source);
   }
-  rowEdit(message, "Dexcom account", strlen(cfg.dexcom_user) > 0 ? String(cfg.dexcom_user) : String("(not set)"), "dexcom", "dx");
-  {
-    const char* srvOpts[3] = {"US (share1.dexcom.com)", "Outside US (shareous1.dexcom.com)", "Japan (share.dexcom.jp)"};
-    const int srvVals[3] = {0, 1, 2};
-    rowSelect(message, "Dexcom server", "dexcom_server", "dx", srvOpts, srvVals, 3, cfg.dexcom_server);
+  message += "<div class=\"row\"><span class=\"note\">Changing the source takes effect after a restart - the device restarts automatically when you save.</span></div>\r\n";
+  if (cfg.data_source == 1) {
+    rowEdit(message, "Dexcom account", strlen(cfg.dexcom_user) > 0 ? String(cfg.dexcom_user) : String("(not set)"), "dexcom", "dx");
+    {
+      const char* srvOpts[3] = {"US", "Outside US", "Japan"};
+      const int srvVals[3] = {0, 1, 2};
+      rowSelect(message, "Dexcom server", "dexcom_server", "dx", srvOpts, srvVals, 3, cfg.dexcom_server);
+    }
+  } else {
+    rowEdit(message, "Nightscout URL", "<a href=\"" + String(NSurl) + "\">" + String(NSurl) + "</a>", "NSurl", "dx");
+    rowToggle(message, "Filter only SGV values", cfg.sgv_only, "sgv_only", "dx");
   }
   message += "</details>\r\n";
 
   // ---- Display ----
   detailsOpen(message, "di", "Display", sec);
+  rowEdit(message, "User name", cfg.userName, "userName", "di");
+  rowSeg(message, "Display units", cfg.show_mgdl, "show_mgdl", "di", "mg/dL", "mmol/L");
   {
     char pageLabels[8][4];
     const char* pageOpts[8]; int pageVals[8];
@@ -681,6 +683,7 @@ void handleSwitchConfig() {
     if(String(w3srv.argName(i)).equals("param")) {
       String param = w3srv.arg(i);
       if(param.equals("data_source")) {
+        int oldSource = cfg.data_source;
         if(haveVal && val>=0 && val<=1) // bump to <=2 once LibreLinkUp is implemented
           cfg.data_source = val;
         else {
@@ -688,8 +691,10 @@ void handleSwitchConfig() {
           if(cfg.data_source > 1)
             cfg.data_source = 0;
         }
+        // Only one source is ever active - switching takes effect after the restart
+        // that Save triggers, same as device name / WiFi changes.
+        if(cfg.data_source != oldSource) restartPending = true;
         dexcomResetSession();
-        ns.sensTime = 0; // force an immediate refetch from the newly selected source
       }
       else if(param.equals("dexcom_server")) {
         if(haveVal && val>=0 && val<=2)
