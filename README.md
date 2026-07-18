@@ -45,7 +45,7 @@ If you know what to do with it, just download the code, modify it any way it sui
 ```ini
 [config]
 
-data_source = 0                     ; glucose data source: 0 = Nightscout (default), 1 = Dexcom Share, 2 = LibreLinkUp (not yet supported)
+data_source = 0                     ; glucose data source: 0 = Nightscout (default), 1 = Dexcom Share, 2 = LibreLinkUp
 nightscout = yournightscoutsite.com ; use your Nightscout site URL (any host - Fly.io, Render, Azure, self-hosted, etc.)
 token = security token              ; token for access secured Nightscout site, 
                                     ; if public Nightscout site is used, delete token line and do not use it
@@ -53,6 +53,11 @@ dexcom_user = your_dexcom_account   ; Dexcom Share account name, only used when 
 dexcom_pass = your_dexcom_password  ; Dexcom Share password, stored in plain text like token/wifi passwords above
                                     ; use the SHARING account, not a follower account
 dexcom_server = 0                   ; Dexcom server region: 0 = US, 1 = outside US, 2 = Japan
+libre_user = your_libre_email       ; LibreLinkUp account email, only used when data_source = 2
+libre_pass = your_libre_password    ; LibreLinkUp password, stored in plain text like token/wifi passwords above
+                                    ; use a LibreLinkUp FOLLOWER account, not the LibreView account itself
+libre_server = 5                    ; LibreLinkUp region: 0=AE 1=AP 2=AU 3=CA 4=DE 5=EU(default) 6=EU2 7=FR 8=JP 9=US 10=LA 11=RU
+                                    ; auto-corrects itself on first login if it doesn't match your account
 bootpic = /M5_NightscoutMon.jpg     ; boot picture
 name = YourName                     ; display name
 device_name = M5NS                  ; device name for mDNS, that can be used to access the device from local

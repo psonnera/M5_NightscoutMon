@@ -58,6 +58,7 @@ Adafruit_NeoPixel pixels(10, 15, NEO_GRB + NEO_KHZ800);
 #include "M5NSconfig.h"
 #include "M5NSWebConfig.h"
 #include "M5NSDexcom.h"
+#include "M5NSLibre.h"
 
 #include <Wire.h>     //The DHT12 uses I2C comunication.
 #include "DHT12.h"
@@ -69,7 +70,7 @@ SHT3X sht30;
 #include "microdot.h"
 MicroDot MD;
 
-String M5NSversion("2026071703");
+String M5NSversion("2026071802");
 
 #define VIBfreq 10000
 #define VIBchannel 14
@@ -798,7 +799,8 @@ int readDataSource() {
   switch(cfg.data_source) {
     case 1:
       return readDexcom(&cfg, &ns);
-    // case 2: return readLibre(&cfg, &ns); // LibreLinkUp, reserved for a future data source
+    case 2:
+      return readLibre(&cfg, &ns);
     default:
       return readNightscout(cfg.url, cfg.token, &ns);
   }

@@ -74,6 +74,9 @@ void readConfigFromFlash(tConfig *cfg) {
     prefs.getString("dexcom_user", cfg->dexcom_user, 64);
     prefs.getString("dexcom_pass", cfg->dexcom_pass, 64);
     cfg->dexcom_server = prefs.getInt("dexcom_server", 0);
+    prefs.getString("libre_user", cfg->libre_user, 64);
+    prefs.getString("libre_pass", cfg->libre_pass, 64);
+    cfg->libre_server = prefs.getInt("libre_server", 5);
     prefs.getString("bootpic", cfg->bootPic, 64);
     prefs.getString("user_name", cfg->userName, 32);
     if(strlen(cfg->userName)==0)
@@ -165,6 +168,9 @@ void saveConfigToFlash(tConfig *cfg) {
     prefs.putString("dexcom_user", cfg->dexcom_user);
     prefs.putString("dexcom_pass", cfg->dexcom_pass);
     prefs.putInt("dexcom_server", cfg->dexcom_server);
+    prefs.putString("libre_user", cfg->libre_user);
+    prefs.putString("libre_pass", cfg->libre_pass);
+    prefs.putInt("libre_server", cfg->libre_server);
     prefs.putString("bootpic", cfg->bootPic);
     prefs.putString("user_name", cfg->userName);
     prefs.putString("device_name", cfg->deviceName);
@@ -355,6 +361,37 @@ void readConfiguration(const char *iniFilename, tConfig *cfg) {
   }
   if (cfg->dexcom_server < 0 || cfg->dexcom_server > 2)
     cfg->dexcom_server = 0;
+
+  if (ini.getValue("config", "libre_user", buffer, bufferLen)) {
+    Serial.print("libre_user = ");
+    Serial.println(buffer);
+    strlcpy(cfg->libre_user, buffer, 64);
+  }
+  else {
+    Serial.println("NO libre_user defined");
+    cfg->libre_user[0] = '\0';
+  }
+
+  if (ini.getValue("config", "libre_pass", buffer, bufferLen)) {
+    Serial.println("libre_pass defined");
+    strlcpy(cfg->libre_pass, buffer, 64);
+  }
+  else {
+    Serial.println("NO libre_pass defined");
+    cfg->libre_pass[0] = '\0';
+  }
+
+  if (ini.getValue("config", "libre_server", buffer, bufferLen)) {
+    Serial.print("libre_server = ");
+    cfg->libre_server = atoi(buffer);
+    Serial.println(cfg->libre_server);
+  }
+  else {
+    Serial.println("NO libre_server defined -> 5 = EU");
+    cfg->libre_server = 5;
+  }
+  if (cfg->libre_server < 0 || cfg->libre_server > 11)
+    cfg->libre_server = 5;
 
   if (ini.getValue("config", "bootpic", buffer, bufferLen)) {
     Serial.print("bootpic = ");

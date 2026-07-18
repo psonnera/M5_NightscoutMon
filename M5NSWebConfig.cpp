@@ -17,6 +17,7 @@
 #include "M5NSconfig.h"
 #include "M5NSWebConfig.h"
 #include "M5NSDexcom.h"
+#include "M5NSLibre.h"
 #include "externs.h"
 
 // OTA firmware is served straight from this repo (raw.githubusercontent.com, master
@@ -240,9 +241,9 @@ void handleRoot() {
   // fields relevant to the selected source are shown here, the rest stay hidden.
   detailsOpen(message, "dx", "Data source", sec);
   {
-    const char* dsOpts[2] = {"Nightscout", "Dexcom Share"}; // add "LibreLinkUp" once data_source=2 is implemented
-    const int dsVals[2] = {0, 1};
-    rowSelect(message, "Source", "data_source", "dx", dsOpts, dsVals, 2, cfg.data_source);
+    const char* dsOpts[3] = {"Nightscout", "Dexcom Share", "LibreLinkUp"};
+    const int dsVals[3] = {0, 1, 2};
+    rowSelect(message, "Source", "data_source", "dx", dsOpts, dsVals, 3, cfg.data_source);
   }
   message += "<div class=\"row\"><span class=\"note\">Changing the source takes effect after a restart - the device restarts automatically when you save.</span></div>\r\n";
   if (cfg.data_source == 1) {
@@ -252,6 +253,14 @@ void handleRoot() {
       const int srvVals[3] = {0, 1, 2};
       rowSelect(message, "Dexcom server", "dexcom_server", "dx", srvOpts, srvVals, 3, cfg.dexcom_server);
     }
+  } else if (cfg.data_source == 2) {
+    rowEdit(message, "LibreLinkUp account", strlen(cfg.libre_user) > 0 ? String(cfg.libre_user) : String("(not set)"), "libre", "dx");
+    {
+      int srvVals[12];
+      for (int i = 0; i < 12; i++) srvVals[i] = i;
+      rowSelect(message, "LibreLinkUp region", "libre_server", "dx", libreRegionNames, srvVals, 12, cfg.libre_server);
+    }
+    message += "<div class=\"row\"><span class=\"note\">The region self-corrects on the first successful login if it doesn't match your account.</span></div>\r\n";
   } else {
     rowEdit(message, "Nightscout URL", "<a href=\"" + String(NSurl) + "\">" + String(NSurl) + "</a>", "NSurl", "dx");
     rowToggle(message, "Filter only SGV values", cfg.sgv_only, "sgv_only", "dx");
@@ -684,17 +693,18 @@ void handleSwitchConfig() {
       String param = w3srv.arg(i);
       if(param.equals("data_source")) {
         int oldSource = cfg.data_source;
-        if(haveVal && val>=0 && val<=1) // bump to <=2 once LibreLinkUp is implemented
+        if(haveVal && val>=0 && val<=2)
           cfg.data_source = val;
         else {
           cfg.data_source++;
-          if(cfg.data_source > 1)
+          if(cfg.data_source > 2)
             cfg.data_source = 0;
         }
         // Only one source is ever active - switching takes effect after the restart
         // that Save triggers, same as device name / WiFi changes.
         if(cfg.data_source != oldSource) restartPending = true;
         dexcomResetSession();
+        libreResetSession();
       }
       else if(param.equals("dexcom_server")) {
         if(haveVal && val>=0 && val<=2)
@@ -705,6 +715,16 @@ void handleSwitchConfig() {
             cfg.dexcom_server = 0;
         }
         dexcomResetSession();
+      }
+      else if(param.equals("libre_server")) {
+        if(haveVal && val>=0 && val<=11)
+          cfg.libre_server = val;
+        else {
+          cfg.libre_server++;
+          if(cfg.libre_server > 11)
+            cfg.libre_server = 0;
+        }
+        libreResetSession();
       }
       else if(param.equals("show_mgdl")) {
         if(haveVal) cfg.show_mgdl = (val!=0);
@@ -881,6 +901,10 @@ void handleEditConfigItem() {
       editRow(message, "Dexcom account", "<input type=\"text\" name=\"dexcom_user\" value=\"" + String(cfg.dexcom_user) + "\" size=\"28\" maxlength=\"63\">", "use the account that SHARES glucose data, not a follower account");
       editRow(message, "Dexcom password", "<input type=\"password\" name=\"dexcom_pass\" value=\"" + String(cfg.dexcom_pass) + "\" size=\"28\" maxlength=\"63\">", "stored on the device SD card / flash in plain text");
     }
+    if(String(w3srv.arg(0)).equals("libre")) {
+      editRow(message, "LibreLinkUp email", "<input type=\"text\" name=\"libre_user\" value=\"" + String(cfg.libre_user) + "\" size=\"28\" maxlength=\"63\">", "use a LibreLinkUp follower account, not the LibreView account itself");
+      editRow(message, "LibreLinkUp password", "<input type=\"password\" name=\"libre_pass\" value=\"" + String(cfg.libre_pass) + "\" size=\"28\" maxlength=\"63\">", "stored on the device SD card / flash in plain text");
+    }
     if(String(w3srv.arg(0)).equals("deviceName")) {
       editRow(message, "Device name", "<input type=\"text\" name=\"deviceName\" value=\"" + String(cfg.deviceName) + "\" size=\"12\" maxlength=\"32\">.local");
       message += "<p class=\"warn\">Applied after Save - the device will restart automatically.</p>\r\n";
@@ -932,18 +956,15 @@ void handleEditConfigItem() {
       // channel-hop, which can knock already-connected SoftAP clients (like the phone
       // filling out this very form) off the network mid-scan.
       int numSsids = WiFi.scanNetworks();
-      for(int i=1; i<10; i++) {
-        String ssidInput;
-        if (cfg.wlanssid[i][0] != 0) {
-          ssidInput = "<input type=\"text\" name=\"wlanssid" + String(i) + "\" value=\"" + String(cfg.wlanssid[i]) + "\" size=\"12\" maxlength=\"63\">";
-        } else {
-          ssidInput = "<select name=\"wlanssid" + String(i) + "\">";
-          ssidInput += "<option selected value=\"\">none</option>";
-          for (int j=0; j<numSsids; j++) {
-            ssidInput += "<option value=\"" + String(WiFi.SSID(j)) + "\">" + String(WiFi.SSID(j)) + "</option>";
-          }
-          ssidInput += "</select>";
-        }
+      // A <datalist> only offers scanned networks as suggestions - unlike a <select>, it
+      // still lets you type any SSID, so hidden or out-of-range networks can be entered too.
+      message += "<datalist id=\"wlanscan\">";
+      for (int j=0; j<numSsids; j++) {
+        message += "<option value=\"" + String(WiFi.SSID(j)) + "\">";
+      }
+      message += "</datalist>\r\n";
+      for(int i=0; i<10; i++) {
+        String ssidInput = "<input type=\"text\" name=\"wlanssid" + String(i) + "\" list=\"wlanscan\" value=\"" + String(cfg.wlanssid[i]) + "\" size=\"12\" maxlength=\"63\" placeholder=\"SSID (or type a hidden/out-of-range one)\">";
         ssidInput += " <input type=\"password\" name=\"wlanpass" + String(i) + "\" value=\"" + String(cfg.wlanpass[i]) + "\" size=\"12\" maxlength=\"63\" placeholder=\"password\">";
         char lbl[10]; snprintf(lbl, sizeof(lbl), "wlan%d", i);
         editRow(message, lbl, ssidInput);
@@ -1000,6 +1021,14 @@ void handleGetEditConfigItem() {
     if(String(w3srv.argName(i)).equals("dexcom_pass")) {
       strncpy(cfg.dexcom_pass, String(w3srv.arg(i)).c_str(), 64);
       dexcomResetSession();
+    }
+    if(String(w3srv.argName(i)).equals("libre_user")) {
+      strncpy(cfg.libre_user, String(w3srv.arg(i)).c_str(), 64);
+      libreResetSession();
+    }
+    if(String(w3srv.argName(i)).equals("libre_pass")) {
+      strncpy(cfg.libre_pass, String(w3srv.arg(i)).c_str(), 64);
+      libreResetSession();
     }
     if(String(w3srv.argName(i)).equals("deviceName")) {
       String newVal = String(w3srv.arg(i));
@@ -1217,6 +1246,9 @@ static void persistConfigToDisk() {
     dstFil.print("dexcom_user = "); dstFil.print(cfg.dexcom_user); dstFil.print("\r\n");
     dstFil.print("dexcom_pass = "); dstFil.print(cfg.dexcom_pass); dstFil.print("\r\n");
     dstFil.print("dexcom_server = "); dstFil.print(cfg.dexcom_server); dstFil.print("\r\n");
+    dstFil.print("libre_user = "); dstFil.print(cfg.libre_user); dstFil.print("\r\n");
+    dstFil.print("libre_pass = "); dstFil.print(cfg.libre_pass); dstFil.print("\r\n");
+    dstFil.print("libre_server = "); dstFil.print(cfg.libre_server); dstFil.print("\r\n");
     dstFil.print("bootpic = "); dstFil.print(cfg.bootPic); dstFil.print("\r\n");
     dstFil.print("name = "); dstFil.print(cfg.userName); dstFil.print("\r\n");
     dstFil.print("device_name = "); dstFil.print(cfg.deviceName); dstFil.print("\r\n");

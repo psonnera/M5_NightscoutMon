@@ -1,1 +1,1 @@
-Added Dexcom Share ("Follow") as an alternative glucose data source - see the new "Data source" section in the web config page.
+Added LibreLinkUp ("LibreView") follower accounts as a glucose data source - see the new "Data source" section in the web config page.

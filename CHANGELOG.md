@@ -3,6 +3,10 @@
 ## Revisions
 
 
+### 18 July 2026 (LibreLinkUp data source)
+
+* Added LibreLinkUp ("LibreView") follower accounts as the third glucose data source (`data_source = 2`), filling in the slot the Dexcom Share integration reserved. New config: `libre_user`, `libre_pass`, `libre_server` (region index, default 5 = EU), settable via `M5NS.INI`, NVS flash, or the web config UI's "Data source" section (region dropdown covers all 12 LibreLinkUp regions). Fetch logic lives in the new `M5NSLibre.cpp`/`.h`: logs in via `/llu/auth/login`, follows a region "redirect" response automatically (persisting the corrected region), resolves the first followed patient via `/llu/connections`, then reads `/llu/connections/{id}/graph` for the current reading plus recent history. The graph response is parsed with an ArduinoJson streaming filter (only the fields actually used) into a local document, since the unfiltered payload is too large for the shared 16 KB `JSONdoc`. Reuses the existing `directionToArrowAngle()` trend mapping and the Dexcom-style bad-credential backoff.
+
 ### 16 July 2026 (unique per-device name)
 
 * The device name (`deviceName`, previously always the fixed `M5NS`) now defaults to a per-device `M5NS-XXXX`, where `XXXX` is derived from the last two bytes of the device's ESP32 eFuse MAC address. This makes the mDNS name (`m5ns-xxxx.local`), SoftAP SSID, Wi-Fi join QR code, and DHCP hostname unique, so `<name>.local` no longer ambiguously resolves to whichever of several devices on the same network answers first. A `device_name` that is empty, or still the legacy fixed `M5NS`/`m5ns`, is treated as unset and replaced by the derived default; a name you've customized in the config UI or `M5NS.INI` is left untouched. The Android M5StackLoader app derives the identical name independently from the same eFuse bytes and writes it into the device's NVS during flashing, so even a device with older firmware picks up its unique name once reflashed with a current app build.
