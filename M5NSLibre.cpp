@@ -200,13 +200,14 @@ static int fetchPatientId(WiFiClientSecure &client, int serverIdx) {
   }
   JsonArray arr = JSONdoc["data"].as<JsonArray>();
   if (arr.size() == 0) {
-    addErrorLog(1004);
-    return 1004;
+    // Login worked but this follower account isn't linked to any sensor/connection.
+    addErrorLog(1204);
+    return 1204;
   }
   const char* pid = arr[0]["patientId"] | "";
   if (strlen(pid) == 0) {
-    addErrorLog(1004);
-    return 1004;
+    addErrorLog(1204);
+    return 1204;
   }
   strlcpy(librePatientId, pid, sizeof(librePatientId));
   return 0;

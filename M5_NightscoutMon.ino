@@ -70,7 +70,7 @@ SHT3X sht30;
 #include "microdot.h"
 MicroDot MD;
 
-String M5NSversion("2026071802");
+String M5NSversion("2026071901");
 
 #define VIBfreq 10000
 #define VIBchannel 14
@@ -254,6 +254,68 @@ void addErrorLog(int code){
   err_log[err_log_ptr].err_code=code;
   err_log_ptr++;
   err_log_count++;
+}
+
+// Human-readable text for a positive error-log code, shown on the error log page.
+// Codes shared between data sources (JSON parse / no data) are labelled with the
+// active source, so the log doesn't e.g. blame Dexcom while LibreLinkUp is selected.
+static void errorLogMessage(int code, char *out, size_t outSize) {
+  const char *src = (cfg.data_source==1) ? "Dexcom" :
+                    (cfg.data_source==2) ? "LibreLinkUp" : "Nightscout";
+  switch(code) {
+    case 1001: snprintf(out, outSize, "JSON parse failed (%s)", src); break;
+    case 1002: strlcpy(out, "No data from Nightscout", outSize); break;
+    case 1003: strlcpy(out, "JSON2 parse failed (Nightscout)", outSize); break;
+    case 1004: snprintf(out, outSize, "No current reading from %s", src); break;
+    case 1101: strlcpy(out, "Dexcom communication error", outSize); break;
+    case 1102: strlcpy(out, "Dexcom bad credentials - check username/password", outSize); break;
+    case 1201: strlcpy(out, "LibreLinkUp login / API error", outSize); break;
+    case 1202: strlcpy(out, "LibreLinkUp bad credentials - check email/password", outSize); break;
+    case 1203: strlcpy(out, "Accept new LibreLinkUp terms in the LibreLinkUp app", outSize); break;
+    case 1204: strlcpy(out, "No LibreLinkUp connection - link a sensor / accept sharing in the app", outSize); break;
+    default:   snprintf(out, outSize, "HTTP error %d", code); break;
+  }
+}
+
+// Word-wraps `text` for the error log page. The first line starts at (firstX, y);
+// any wrapped continuation lines start at contX and run to rightEdge, so long
+// messages use the full screen width instead of being clipped at the edge.
+// Returns the number of lines drawn (>=1), capped at maxLines. Caller sets font/colour.
+static int drawWrappedString(const char *text, int firstX, int contX, int y,
+                             int rightEdge, int lineH, int maxLines) {
+  char line[96];
+  line[0] = 0;
+  int lines = 0;
+  int curX = firstX;
+  const char *word = text;
+  while(*word) {
+    while(*word==' ') word++;
+    if(!*word) break;
+    const char *e = word;
+    while(*e && *e!=' ') e++;
+    int wlen = e - word;
+    char cand[96];
+    if(line[0])
+      snprintf(cand, sizeof(cand), "%s %.*s", line, wlen, word);
+    else
+      snprintf(cand, sizeof(cand), "%.*s", wlen, word);
+    if(line[0] && (curX + M5.Lcd.textWidth(cand) > rightEdge)) {
+      M5.Lcd.drawString(line, curX, y + lines*lineH); // flush full line, then wrap
+      lines++;
+      if(lines >= maxLines)
+        return lines;
+      curX = contX;
+      snprintf(line, sizeof(line), "%.*s", wlen, word);
+    } else {
+      strlcpy(line, cand, sizeof(line));
+    }
+    word = e;
+  }
+  if(line[0] && lines < maxLines) {
+    M5.Lcd.drawString(line, curX, y + lines*lineH);
+    lines++;
+  }
+  return lines ? lines : 1;
 }
 
 uint16_t crc16_update(uint16_t crc, uint8_t a)
@@ -2135,47 +2197,33 @@ void draw_page() {
         M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
         M5.Lcd.drawString("no errors in log", 0, 20);
       } else {
-        int maxErrDisp = err_log_ptr;
-        if(maxErrDisp>6)
-          maxErrDisp = 6;
-        for(int i=0; i<maxErrDisp; i++) {
+        // Each entry: timestamp at x=0, message starting at x=132 and word-wrapping
+        // onto full-width continuation lines so nothing is clipped at the screen edge.
+        int lineH = 18;
+        int rightEdge = M5.Lcd.width() - 2;
+        int y = 20;
+        int lineBudget = 6; // message rows available before the "Total errors" line at row 6
+        int linesUsed = 0;
+        char msg[96];
+        for(int i=0; i<err_log_ptr && linesUsed<lineBudget; i++) {
           M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
           sprintf(tmpStr, "%02d.%02d.%02d:%02d", err_log[i].err_time.tm_mday, err_log[i].err_time.tm_mon+1, err_log[i].err_time.tm_hour, err_log[i].err_time.tm_min);
-          M5.Lcd.drawString(tmpStr, 0, 20+i*18);
+          M5.Lcd.drawString(tmpStr, 0, y);
           if(err_log[i].err_code<0) {
             M5.Lcd.setTextColor(TFT_RED, TFT_BLACK);
-            strlcpy(tmpStr, http.errorToString(err_log[i].err_code).c_str(), 32);
+            strlcpy(msg, http.errorToString(err_log[i].err_code).c_str(), sizeof(msg));
           } else {
             M5.Lcd.setTextColor(TFT_YELLOW, TFT_BLACK);
-            switch(err_log[i].err_code) {
-              case 1001:
-                strcpy(tmpStr, "JSON parsing failed");
-                break;
-              case 1002:
-                strcpy(tmpStr, "No data from Nightscout");
-                break;
-              case 1003:
-                strcpy(tmpStr, "JSON2 parsing failed");
-                break;
-              case 1004:
-                strcpy(tmpStr, "No data from Dexcom");
-                break;
-              case 1101:
-                strcpy(tmpStr, "Dexcom communication error");
-                break;
-              case 1102:
-                strcpy(tmpStr, "Dexcom bad credentials");
-                break;
-              default:
-                sprintf(tmpStr, "HTTP error %d", err_log[i].err_code);
-            }
+            errorLogMessage(err_log[i].err_code, msg, sizeof(msg));
           }
-          M5.Lcd.drawString(tmpStr, 132, 20+i*18);
+          int used = drawWrappedString(msg, 132, 0, y, rightEdge, lineH, lineBudget-linesUsed);
+          y += used*lineH;
+          linesUsed += used;
         }
         M5.Lcd.setFreeFont(FMB9);
         M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
         sprintf(tmpStr, "Total errors %d", err_log_count);
-        M5.Lcd.drawString(tmpStr, 0, 20+maxErrDisp*18);
+        M5.Lcd.drawString(tmpStr, 0, 20+6*18);
       }
       sprintf(tmpStr, "Free Heap = %u", ESP.getFreeHeap());
       M5.Lcd.drawString(tmpStr, 0, 20+7*18);
