@@ -256,11 +256,11 @@ void handleRoot() {
   } else if (cfg.data_source == 2) {
     rowEdit(message, "LibreLinkUp account", strlen(cfg.libre_user) > 0 ? String(cfg.libre_user) : String("(not set)"), "libre", "dx");
     {
-      int srvVals[12];
-      for (int i = 0; i < 12; i++) srvVals[i] = i;
-      rowSelect(message, "LibreLinkUp region", "libre_server", "dx", libreRegionNames, srvVals, 12, cfg.libre_server);
+      int srvVals[13];
+      for (int i = 0; i < 13; i++) srvVals[i] = i;
+      rowSelect(message, "LibreLinkUp region", "libre_server", "dx", libreRegionNames, srvVals, 13, cfg.libre_server);
     }
-    message += "<div class=\"row\"><span class=\"note\">The region self-corrects on the first successful login if it doesn't match your account.</span></div>\r\n";
+    message += "<div class=\"row\"><span class=\"note\">Leave at AUTO: the device logs in through LibreLinkUp's universal entry point and detects your region automatically.</span></div>\r\n";
   } else {
     rowEdit(message, "Nightscout URL", "<a href=\"" + String(NSurl) + "\">" + String(NSurl) + "</a>", "NSurl", "dx");
     rowToggle(message, "Filter only SGV values", cfg.sgv_only, "sgv_only", "dx");
@@ -717,11 +717,11 @@ void handleSwitchConfig() {
         dexcomResetSession();
       }
       else if(param.equals("libre_server")) {
-        if(haveVal && val>=0 && val<=11)
+        if(haveVal && val>=0 && val<=12)
           cfg.libre_server = val;
         else {
           cfg.libre_server++;
-          if(cfg.libre_server > 11)
+          if(cfg.libre_server > 12)
             cfg.libre_server = 0;
         }
         libreResetSession();

@@ -14,7 +14,7 @@ struct tConfig {
   int dexcom_server = 0; // 0 = US (share1.dexcom.com), 1 = outside US (shareous1.dexcom.com), 2 = Japan (share.dexcom.jp)
   char libre_user[64]; // LibreLinkUp account email
   char libre_pass[64]; // stored in plain text, same as token/wlanpass
-  int libre_server = 5; // index into libreRegionNames[]/LIBRE_HOSTS[] in M5NSLibre.cpp, 5 = EU
+  int libre_server = 12; // index into libreRegionNames[]/LIBRE_HOSTS[] in M5NSLibre.cpp, 12 = AUTO (universal entry point)
   char bootPic[64];
   char userName[32];
   char deviceName[32];

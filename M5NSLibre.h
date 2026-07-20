@@ -11,9 +11,10 @@ int readLibre(tConfig *cfg, struct NSinfo *ns);
 // bad-credential backoff flag. Call whenever the LibreLinkUp email, password or region changes.
 void libreResetSession();
 
-// Region codes for cfg->libre_server (0-11), in index order: AE, AP, AU, CA, DE, EU, EU2,
-// FR, JP, US, LA, RU. Used for the web UI region dropdown and to match the "redirect" region
-// LibreLinkUp reports when an account was created in a different region than configured.
-extern const char* const libreRegionNames[12];
+// Region codes for cfg->libre_server, in index order: AE, AP, AU, CA, DE, EU, EU2, FR, JP,
+// US, LA, RU (0-11), then AUTO (12) = the universal entry point (api.libreview.io) used as
+// the default: login starts there and follows the region LibreLinkUp reports via "redirect".
+// Used for the web UI region dropdown and to match that redirect region.
+extern const char* const libreRegionNames[13];
 
 #endif

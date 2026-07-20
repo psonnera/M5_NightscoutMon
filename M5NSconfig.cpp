@@ -76,7 +76,7 @@ void readConfigFromFlash(tConfig *cfg) {
     cfg->dexcom_server = prefs.getInt("dexcom_server", 0);
     prefs.getString("libre_user", cfg->libre_user, 64);
     prefs.getString("libre_pass", cfg->libre_pass, 64);
-    cfg->libre_server = prefs.getInt("libre_server", 5);
+    cfg->libre_server = prefs.getInt("libre_server", 12);
     prefs.getString("bootpic", cfg->bootPic, 64);
     prefs.getString("user_name", cfg->userName, 32);
     if(strlen(cfg->userName)==0)
@@ -387,11 +387,11 @@ void readConfiguration(const char *iniFilename, tConfig *cfg) {
     Serial.println(cfg->libre_server);
   }
   else {
-    Serial.println("NO libre_server defined -> 5 = EU");
-    cfg->libre_server = 5;
+    Serial.println("NO libre_server defined -> 12 = AUTO");
+    cfg->libre_server = 12;
   }
-  if (cfg->libre_server < 0 || cfg->libre_server > 11)
-    cfg->libre_server = 5;
+  if (cfg->libre_server < 0 || cfg->libre_server > 12)
+    cfg->libre_server = 12;
 
   if (ini.getValue("config", "bootpic", buffer, bufferLen)) {
     Serial.print("bootpic = ");

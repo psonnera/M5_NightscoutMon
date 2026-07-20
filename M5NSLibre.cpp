@@ -16,13 +16,19 @@
 #include "M5NSDexcom.h" // reuses directionToArrowAngle()
 #include "externs.h"
 
-const char* const libreRegionNames[12] = {
-  "AE", "AP", "AU", "CA", "DE", "EU", "EU2", "FR", "JP", "US", "LA", "RU"
+// Real, redirect-matchable regions occupy indices 0..LIBRE_NUM_REGIONS-1. Index LIBRE_AUTO
+// is the universal entry point: login starts there and follows the region redirect, so the
+// user never has to guess. LibreLinkUp never reports "auto" as a redirect region.
+#define LIBRE_NUM_REGIONS 12
+#define LIBRE_AUTO 12
+const char* const libreRegionNames[13] = {
+  "AE", "AP", "AU", "CA", "DE", "EU", "EU2", "FR", "JP", "US", "LA", "RU", "AUTO"
 };
-static const char* LIBRE_HOSTS[12] = {
+static const char* LIBRE_HOSTS[13] = {
   "api-ae.libreview.io", "api-ap.libreview.io", "api-au.libreview.io", "api-ca.libreview.io",
   "api-de.libreview.io", "api-eu.libreview.io", "api-eu2.libreview.io", "api-fr.libreview.io",
-  "api-jp.libreview.io", "api-us.libreview.io", "api-la.libreview.io", "api.libreview.ru"
+  "api-jp.libreview.io", "api-us.libreview.io", "api-la.libreview.io", "api.libreview.ru",
+  "api.libreview.io"
 };
 
 #define LIBRE_LINK_UP_VERSION "4.16.0"
@@ -134,7 +140,7 @@ static int loginLibre(WiFiClientSecure &client, int serverIdx, const char *email
 
   if (JSONdoc["data"]["redirect"] | false) {
     const char* region = JSONdoc["data"]["region"] | "";
-    for (int i = 0; i < 12; i++) {
+    for (int i = 0; i < LIBRE_NUM_REGIONS; i++) {
       if (strcasecmp(region, libreRegionNames[i]) == 0) {
         *redirectRegion = i;
         break;
@@ -204,7 +210,24 @@ static int fetchPatientId(WiFiClientSecure &client, int serverIdx) {
     addErrorLog(1204);
     return 1204;
   }
-  const char* pid = arr[0]["patientId"] | "";
+  // A follower account may be linked to several people; arr[0] is not necessarily the one
+  // whose sensor is currently reporting. Prefer the connection that has a live
+  // glucoseMeasurement (most recent wins), so we don't follow an idle sensor and get an
+  // endless "No current reading" (1004).
+  const char* pid = "";
+  time_t bestTs = 0;
+  for (int i = 0; i < (int)arr.size(); i++) {
+    JsonObject gm = arr[i]["glucoseMeasurement"];
+    if (gm.isNull())
+      continue; // no live reading on this connection
+    time_t ts = parseLibreTimestamp(gm["FactoryTimestamp"] | "");
+    if (pid[0] == 0 || ts > bestTs) {
+      pid = arr[i]["patientId"] | "";
+      bestTs = ts;
+    }
+  }
+  if (pid[0] == 0)
+    pid = arr[0]["patientId"] | ""; // none reporting - fall back (graph will report 1004)
   if (strlen(pid) == 0) {
     addErrorLog(1204);
     return 1204;
@@ -224,8 +247,8 @@ int readLibre(tConfig *cfg, struct NSinfo *ns) {
   }
 
   int serverIdx = cfg->libre_server;
-  if (serverIdx < 0 || serverIdx > 11)
-    serverIdx = 5; // EU
+  if (serverIdx < 0 || serverIdx > LIBRE_AUTO)
+    serverIdx = LIBRE_AUTO; // default: log in via the universal entry point and auto-detect the region
 
   WiFiClientSecure client;
   client.setInsecure();
@@ -238,10 +261,11 @@ int readLibre(tConfig *cfg, struct NSinfo *ns) {
       if (err != 0)
         return err;
       if (redirectRegion >= 0 && redirectRegion != serverIdx) {
-        Serial.printf("[Libre] Wrong region, switching to %s\r\n", libreRegionNames[redirectRegion]);
+        // Universal entry point told us the account's real region - use it for this
+        // session's connections/graph calls. Not persisted, so login always restarts at the
+        // universal entry point and re-detects (handles a later region change on its own).
+        Serial.printf("[Libre] Region detected: %s\r\n", libreRegionNames[redirectRegion]);
         serverIdx = redirectRegion;
-        cfg->libre_server = serverIdx;
-        saveConfigToFlash(cfg);
         err = loginLibre(client, serverIdx, cfg->libre_user, cfg->libre_pass, 0, &redirectRegion);
         if (err != 0)
           return err;
@@ -299,6 +323,12 @@ int readLibre(tConfig *cfg, struct NSinfo *ns) {
 
     JsonObject gm = doc["data"]["connection"]["glucoseMeasurement"];
     if (gm.isNull()) {
+      // The followed connection has no live reading. The active sensor may have moved to
+      // another patient on this follower account - re-resolve once before reporting 1004.
+      if (attempt == 0) {
+        librePatientId[0] = 0;
+        continue;
+      }
       addErrorLog(1004);
       return 1004;
     }
