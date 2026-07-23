@@ -56,6 +56,7 @@ static void setLibreHeaders(HTTPClient &http, bool authRequired) {
   http.addHeader("User-Agent", LIBRE_USER_AGENT);
   http.addHeader("Content-Type", "application/json;charset=UTF-8");
   http.addHeader("Accept", "application/json");
+  http.addHeader("cache-control", "no-cache");
   http.addHeader("version", LIBRE_LINK_UP_VERSION);
   http.addHeader("product", LIBRE_LINK_UP_PRODUCT);
   if (authRequired) {
@@ -127,15 +128,9 @@ static int loginLibre(WiFiClientSecure &client, int serverIdx, const char *email
   JSONdoc.clear();
   DeserializationError jerr = deserializeJson(JSONdoc, resp);
   if (jerr) {
+    Serial.printf("[Libre] login parse error: %s\r\n", jerr.c_str());
     addErrorLog(1001);
     return 1001;
-  }
-
-  int status = JSONdoc["status"] | 0;
-  if (status != 0) {
-    libreCredentialError = true;
-    addErrorLog(1202);
-    return 1202;
   }
 
   if (JSONdoc["data"]["redirect"] | false) {
@@ -164,6 +159,15 @@ static int loginLibre(WiFiClientSecure &client, int serverIdx, const char *email
     http2.POST("{}");
     http2.end();
     return loginLibre(client, serverIdx, email, pass, touDepth + 1, redirectRegion);
+  }
+
+  // Checked only after the redirect and terms-of-use steps: those arrive with a nonzero
+  // status too (tou = 4), and must not be mistaken for bad credentials.
+  int status = JSONdoc["status"] | 0;
+  if (status != 0) {
+    libreCredentialError = true;
+    addErrorLog(1202);
+    return 1202;
   }
 
   const char* token = JSONdoc["data"]["authTicket"]["token"] | "";
@@ -201,6 +205,7 @@ static int fetchPatientId(WiFiClientSecure &client, int serverIdx) {
   JSONdoc.clear();
   DeserializationError jerr = deserializeJson(JSONdoc, resp);
   if (jerr) {
+    Serial.printf("[Libre] connections parse error: %s\r\n", jerr.c_str());
     addErrorLog(1001);
     return 1001;
   }
@@ -285,6 +290,10 @@ int readLibre(tConfig *cfg, struct NSinfo *ns) {
 
     HTTPClient http;
     String url = String("https://") + LIBRE_HOSTS[serverIdx] + "/llu/connections/" + librePatientId + "/graph";
+    // HTTP/1.0 forbids chunked responses. Required here because the body is parsed straight
+    // off http.getStream(), which - unlike getString() - does not decode chunked framing;
+    // with HTTP/1.1 the chunk-size lines corrupt the JSON (errors 1001/1004 every poll).
+    http.useHTTP10(true);
     http.begin(client, url);
     setLibreHeaders(http, true);
     int httpCode = http.GET();
@@ -317,6 +326,7 @@ int readLibre(tConfig *cfg, struct NSinfo *ns) {
     http.end();
 
     if (jerr) {
+      Serial.printf("[Libre] graph parse error: %s\r\n", jerr.c_str());
       addErrorLog(1001);
       return 1001;
     }
